@@ -96,7 +96,7 @@ CREATE INDEX IF NOT EXISTS ix_find_resolved ON findings(resolved_at);
 CREATE TABLE IF NOT EXISTS mitigations (  -- approved findings handed to someone (agent, CI/CD, person) to fix
   id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, approved_by TEXT, note TEXT,
   status TEXT NOT NULL DEFAULT 'approved',  -- approved | claimed | running | done | failed | cancelled
-  handoff TEXT,                      -- hand-off target name; NULL = pull (agents fetch it via API / MCP)
+  handoff TEXT,                      -- hand-off target name, NULL = pull (agents fetch it via API / MCP)
   handoff_result TEXT,               -- delivery result of the hand-off
   claimed_by TEXT, claimed_at TEXT, updated_at TEXT,
   playbook TEXT, summary TEXT, log TEXT, rescan INTEGER DEFAULT 1
