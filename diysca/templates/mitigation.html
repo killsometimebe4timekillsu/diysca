@@ -1,0 +1,43 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Mitigation #{{ mi.id }}{% endblock %}
+{% block content %}
+{{ m.view_tabs(page) }}
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<div class="row">
+<div class="card"><h2>Mitigation #{{ mi.id }} <span class="tag st-{{ mi.status }}">{{ mi.status }}</span></h2>
+<table>
+<tr><th>Approved</th><td>{{ mi.created_at }} by <b>{{ mi.approved_by }}</b></td></tr>
+{% if mi.note %}<tr><th>Note</th><td>{{ mi.note }}</td></tr>{% endif %}
+<tr><th>Systems</th><td>{{ mi.hosts|join(', ') }}</td></tr>
+<tr><th>Findings</th><td>{{ mi.findings|length }} ({{ mi.open_findings }} still open) · worst {{ m.sev(mi.summary.worst_severity) }}{% if mi.summary.kev %} · <span class="kev">{{ mi.summary.kev }} KEV</span>{% endif %}</td></tr>
+<tr><th>Playbook</th><td>{{ mi.summary.playbook_packages }} packages on {{ mi.summary.playbook_hosts }} systems{% if mi.summary.manual_items %}, {{ mi.summary.manual_items }} manual items{% endif %} · <a href="/mitigations/{{ mi.id }}/playbook.yml">download</a></td></tr>
+<tr><th>Hand-off</th><td>{{ mi.handoff or 'pull (API / MCP)' }}{% if mi.handoff_result %} · <small>{{ mi.handoff_result }}</small>{% endif %}</td></tr>
+<tr><th>Claimed</th><td>{{ mi.claimed_by or '–' }} {{ mi.claimed_at or '' }}</td></tr>
+<tr><th>Rescan when done</th><td>{{ 'yes' if mi.rescan else 'no' }}</td></tr>
+</table>
+</div>
+<div class="card"><h2>Actions</h2>
+{% if mi.status not in ('done', 'cancelled') %}
+<form method="post" action="/mitigations/{{ mi.id }}/report" class="filters">
+  <label>Set status<select name="status"><option>running</option><option>done</option><option>failed</option></select></label>
+  <label>Log / comment<input name="log" size="36" placeholder="e.g. patched in maintenance window"></label>
+  <button class="secondary">Save</button></form>
+{% if handoffs %}<form method="post" action="/mitigations/{{ mi.id }}/handoff" class="filters" style="margin-top:8px">
+  <label>Send to<select name="target">{% for h in handoffs %}<option>{{ h.name }}</option>{% endfor %}</select></label><button class="secondary">Hand off</button></form>{% endif %}
+<form method="post" action="/mitigations/{{ mi.id }}/cancel" class="filters" style="margin-top:8px">
+  <label>Reason<input name="reason" size="30"></label><button class="danger">Cancel mitigation</button></form>
+{% else %}<p class="muted">This mitigation is {{ mi.status }}.</p>{% endif %}
+<h2 style="margin-top:14px">For agents and CI/CD</h2>
+<pre class="mono"><small>curl -H "Authorization: Bearer $TOKEN" -X POST {{ mi.links.claim }}
+curl -H "Authorization: Bearer $TOKEN" {{ mi.links.playbook }} -o mitigation.yml
+ansible-playbook -i inventory mitigation.yml
+curl -H "Authorization: Bearer $TOKEN" -X POST {{ mi.links.report }} \
+     -H 'Content-Type: application/json' -d '{"status":"done","log":"..."}'</small></pre>
+</div></div>
+<div class="card"><h2>Findings</h2><table><tr><th>Severity</th><th>CVE</th><th>System</th><th>Package</th><th>Installed</th><th>Fix</th><th>Now</th></tr>
+{% for f in mi.findings %}<tr><td>{{ m.sev(f.severity) }} {% if f.kev %}<span class="kev">KEV</span>{% endif %}</td><td><a href="/findings/{{ f.id }}">{{ f.vuln_id }}</a></td><td>{{ f.host }}</td>
+<td>{{ f.package }}{% if f.ecosystem %} <span class="tag">{{ f.ecosystem }}</span>{% endif %}</td><td class="mono">{{ f.version }}</td><td class="mono">{{ f.repo_version if f.fix_in_repo else (f.fixed_version or 'no fix') }}</td>
+<td class="{{ 'ok' if f.status == 'resolved' else '' }}">{{ 'patched' if f.status == 'resolved' else f.status }}</td></tr>{% endfor %}</table></div>
+<div class="card"><h2>Log</h2><pre class="mono"><small>{{ mi.log }}</small></pre></div>
+<div class="card"><h2>Playbook</h2><pre class="mono"><small>{{ mi.playbook }}</small></pre></div>
+{% endblock %}

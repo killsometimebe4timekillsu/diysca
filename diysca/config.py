@@ -51,6 +51,10 @@ class Settings:
     sources: list = field(default_factory=list)  # extra vulnerability sources, see config.example.yml
     repo_managers: list = field(default_factory=list)  # aptly / pulp / foreman, see config.example.yml
 
+    # API tokens for agents, CI/CD and MCP clients: {name: token}. Sent as "Authorization: Bearer <token>".
+    # Env: DIYSCA_API_TOKENS="ci:abc123,agent:def456"
+    api_tokens: dict = field(default_factory=dict)
+    agents_can_approve: bool = False  # may token holders (agents, MCP) approve findings themselves?
     web_user: str = ""  # set both to enable HTTP basic auth
     web_password: str = ""
     base_url: str = "http://localhost:8080"
@@ -86,6 +90,10 @@ def _coerce(t, v):
         return int(v)
     if t in (float, "float"):
         return float(v)
+    if t in (dict, "dict"):
+        if isinstance(v, dict):
+            return {str(k): str(x) for k, x in v.items()}
+        return dict(p.split(":", 1) for p in str(v).split(",") if ":" in p)
     if t in ("list[str]",) or t == list[str]:
         return [x.strip() for x in str(v).split(",") if x.strip()] if isinstance(v, str) else list(v)
     return v

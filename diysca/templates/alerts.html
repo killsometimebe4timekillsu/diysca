@@ -3,6 +3,16 @@
 {% block content %}
 {{ m.settings_tabs(tab) }}
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<details class="card"><summary><b>How alerts work</b></summary>
+<ol class="muted">
+<li>After every scan, each <b>open</b> finding is checked against every enabled <b>subscription</b>: systems pattern, packages pattern, minimum severity, and optionally "only known exploited" or "only if the fix is in my repos".</li>
+<li>Matching findings are grouped <b>per system and channel</b> into one message, worst first (KEV, severity, CVSS), at most 25 per message.</li>
+<li>Each finding is sent to a channel <b>once</b>. A failed delivery is retried on the next run; the result is in "Recently sent" and on the finding's page.</li>
+<li>When a mitigation for alerted findings is claimed, done or failed, the same channels are told.</li>
+</ol>
+<p class="muted">Each finding in a message shows severity, CVE, package and version, CVSS / EPSS / KEV, the advisory summary, <b>what to do</b> (patch from your repos, update the repo mirror first, bump the dependency, or wait for a fix) and a link. The footer links to the system's findings and to approving them for mitigation.</p>
+<p class="muted"><small>Patterns: <span class="mono">web*,db1</span> · exclude with <span class="mono">!test-*</span> · groups with <span class="mono">group:prod</span> · packages match the source package and its binaries (<span class="mono">openssl</span> also matches <span class="mono">libssl3</span>). Try without sending: <span class="mono">diysca notify --dry-run</span>. Full guide: <span class="mono">docs/alerts.md</span>.</small></p>
+</details>
 <div class="row">
 <div class="card"><h2>Channels</h2>
 <table><tr><th>Name</th><th>URL</th><th></th></tr>

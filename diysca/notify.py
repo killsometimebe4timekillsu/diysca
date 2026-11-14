@@ -73,6 +73,45 @@ def format_finding(f, host) -> str:
     return line
 
 
+def action_hint(f) -> str:
+    """What to do about a finding, in one line."""
+    if f["ecosystem"]:
+        return (f"bump {f['package']} to {f['fixed_version']} in the application ({f['location'] or 'see finding'})"
+                if f["fixed_version"] else "no fix released yet; check the advisory for workarounds")
+    if not f["fixed_version"]:
+        return "no fix released yet; check the advisory for workarounds, or ignore it if it doesn't apply"
+    if f["fix_in_repo"]:
+        return f"{f['repo_version'] or f['fixed_version']} is in your repos: patch it, or approve it for mitigation"
+    return (f"the fix ({f['fixed_version']}) isn't in your repos yet: update the repo mirror "
+            f"(Patching > Patch), then patch")
+
+
+def alert_body(fs: list, host, base: str) -> str:
+    """Alert text: one block per finding (worst first), then links."""
+    lines = []
+    for f in fs[:25]:
+        bits = [f["severity"] or "UNKNOWN", f["vuln_id"], f"{f['package']} {f['version']}"]
+        extra = []
+        if f["cvss_score"]:
+            extra.append(f"CVSS {f['cvss_score']:.1f}")
+        if f["epss"] is not None and f["epss"] >= 0.01:
+            extra.append(f"EPSS {f['epss'] * 100:.0f}%")
+        if f["kev"]:
+            extra.append("KNOWN EXPLOITED")
+        lines.append("  ".join(bits) + (f"  ({', '.join(extra)})" if extra else ""))
+        if f["summary"]:
+            lines.append(f"  {f['summary'][:160]}")
+        lines.append(f"  -> {action_hint(f)}")
+        lines.append(f"  {base}/findings/{f['id']}")
+    if len(fs) > 25:
+        lines.append(f"... and {len(fs) - 25} more")
+    lines.append("")
+    lines.append(f"All open findings on {host['name']}: {base}/findings?host={host['name']}")
+    lines.append(f"Approve for mitigation: {base}/findings?host={host['name']}&approval=unapproved"
+                 " (select, then Approve for mitigation)")
+    return "\n".join(lines)
+
+
 def _send(url: str, title: str, body: str, severity: str) -> tuple[bool, str]:
     import apprise
 
@@ -121,14 +160,11 @@ async def dispatch(host_id: int | None = None, dry_run: bool = False) -> int:
             h = hosts[hid]
             worst = max((f["severity"] or "UNKNOWN" for f in fs), key=sev_rank)
             if len(fs) == 1:
-                title = f"[diysca] {fs[0]['vuln_id']} on {h['name']}"
+                title = f"[diysca] {worst} {fs[0]['vuln_id']} in {fs[0]['package']} on {h['name']}"
             else:
-                title = f"[diysca] {len(fs)} new vulnerabilities on {h['name']}"
-            lines = [format_finding(f, h) for f in fs[:25]]
-            if len(fs) > 25:
-                lines.append(f"... and {len(fs) - 25} more")
-            lines.append(f"{settings.base_url.rstrip('/')}/findings?host={h['name']}")
-            body = "\n".join(lines)
+                title = f"[diysca] {len(fs)} new vulnerabilities on {h['name']} (worst: {worst})"
+            fs.sort(key=lambda f: (-f["kev"], -sev_rank(f["severity"] or "UNKNOWN"), -(f["cvss_score"] or 0)))
+            body = alert_body(fs, h, settings.base_url.rstrip("/"))
             if dry_run:
                 print(f"--> {channels[cid]['channel_name']}: {title}\n{body}\n")
                 count += len(fs)

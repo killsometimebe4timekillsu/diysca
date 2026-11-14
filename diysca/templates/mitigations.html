@@ -1,0 +1,33 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Mitigations{% endblock %}
+{% block content %}
+{{ m.view_tabs(page) }}
+{% if request.query_params.get('error') %}<div class="notice bad">{{ request.query_params.get('error') }}</div>{% endif %}
+<div class="card">
+<form class="filters" method="get">
+  <label>Status<select name="status" onchange="this.form.submit()">{% for s in statuses %}<option {{ 'selected' if status==s }}>{{ s }}</option>{% endfor %}</select></label>
+  <span class="muted"><small>open = approved, claimed or running · <a href="/api/mitigations?status={{ status }}">JSON</a></small></span>
+</form>
+<table><tr><th>#</th><th>Status</th><th>Approved</th><th>By</th><th>Systems</th><th>Findings</th><th>Worst</th><th>Hand-off</th><th>Claimed by</th><th>Note</th></tr>
+{% for r in rows %}<tr>
+<td><a href="/mitigations/{{ r.id }}">#{{ r.id }}</a></td>
+<td><span class="tag st-{{ r.status }}">{{ r.status }}</span></td>
+<td class="mono">{{ r.created_at[:16].replace('T', ' ') }}</td><td>{{ r.approved_by }}</td>
+<td>{{ r.summary.hosts|join(', ') if r.summary.hosts|length <= 3 else (r.summary.hosts[:3]|join(', ') ~ ' +' ~ (r.summary.hosts|length - 3)) }}</td>
+<td>{{ r.findings }}{% if r.still_open != r.findings %} <span class="muted">({{ r.still_open }} still open)</span>{% endif %}</td>
+<td>{{ m.sev(r.summary.worst_severity) }}</td>
+<td>{{ r.handoff or 'pull' }}{% if r.handoff_result %}<br><small class="{{ 'bad' if 'HTTP 2' not in r.handoff_result else 'muted' }}">{{ r.handoff_result[:60] }}</small>{% endif %}</td>
+<td>{{ r.claimed_by or '' }}</td><td><small>{{ (r.note or '')[:80] }}</small></td></tr>
+{% else %}<tr><td colspan="10" class="muted">No mitigations here. Approve findings on the <a href="/findings?fix=repo">Findings</a> page.</td></tr>{% endfor %}</table>
+</div>
+<div class="card"><h2>How mitigations work</h2>
+<p class="muted">When diysca can't reach a system (another network, an air gap, a team that owns the deployment), approve its findings instead of patching them yourself. The approval becomes a <b>mitigation</b>: the findings, a playbook pinned to the versions your repos offer, and links to report back.</p>
+<ol class="muted">
+<li><b>Approve</b> findings on the Findings page or a finding's page (people with the login; agents only if <span class="mono">agents_can_approve</span> is on).</li>
+<li><b>Hand off</b>: agents and CI/CD jobs pull approved mitigations through the API or MCP, or diysca pushes them to a <a href="/settings/handoff">hand-off target</a> (webhook, GitHub Actions, GitLab CI).</li>
+<li>The agent <b>claims</b> it, runs the playbook and <b>reports</b> <span class="mono">running</span>, <span class="mono">done</span> or <span class="mono">failed</span>. You can also set the status by hand on the mitigation's page.</li>
+<li>On <b>done</b>, diysca rescans the systems. Fixed findings move to Patched CVEs; the channels that alerted about them are told.</li>
+</ol>
+<p class="muted"><small>See <span class="mono">docs/mitigations.md</span> for the API calls, payloads and a GitHub Actions example.</small></p>
+</div>
+{% endblock %}
