@@ -4,8 +4,11 @@ import json
 
 from fastapi.testclient import TestClient
 
-from diysca import db, mcp, mitigate, notify, settings_io
-from diysca.config import settings
+from diysca import mcp
+from diysca.alerting import notify
+from diysca.core import db, settings_io
+from diysca.core.config import settings
+from diysca.mitigation import mitigate
 
 from .test_settings_reprovision import _scan
 

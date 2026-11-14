@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from diysca.inventory import expand_host_pattern, load_inventory
+from diysca.scanning.inventory import expand_host_pattern, load_inventory
 
 FIX = Path(__file__).parent / "fixtures"
 

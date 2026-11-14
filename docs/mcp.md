@@ -62,7 +62,8 @@ Claude Code: `claude mcp add --transport http diysca https://diysca.example.org/
 | `get_mitigation` | yes | A mitigation with findings, links, log and playbook (`include_playbook`). |
 | `claim_mitigation` | no | Claim an approved mitigation. Fails if someone else claimed it. |
 | `report_mitigation` | no | `status` = `running`, `done` or `failed`, plus `log`. `done` triggers a rescan. |
-| `start_scan` | no | Scan one system (`host`) or all, and return the result. |
+| `patch_log` | yes | The patch log over a `range`, filtered by `kind`, `host`, `cve`, `status`. |
+| `start_scan` | no | Scan one system (`host`), a selection (`hosts` patterns like `web*,group:prod`, and / or `host_ids`) or every enabled system, and return the results. |
 | `approve_findings` | no | Only listed with `agents_can_approve: true`. |
 | `cancel_mitigation` | no | Only listed with `agents_can_approve: true`. |
 

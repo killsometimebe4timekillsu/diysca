@@ -13,6 +13,27 @@ inventories: []
 #  - /inventories/hosts.ini          # OCI image (mount your inventories at /inventories)
 use_ansible_inventory_cli: true   # use `ansible-inventory --list` if installed (dynamic inventories, vault)
 
+# Inventory providers: systems straight from hypervisors, clouds and clusters (docs/inventory-providers.md).
+# Re-read before every scheduled scan, like inventories. Secrets: *_env (environment variable) or *_file.
+inventory_providers: []
+#  - {type: proxmox, name: pve, url: https://pve1:8006, token_id: "diysca@pve!scan", token_secret_env: PVE_TOKEN, user: root}
+#  - {type: vsphere, name: vc, url: https://vcenter.example.org, username: ro@vsphere.local, password_env: VC_PW}
+#  - {type: libvirt, name: kvm1, uri: "qemu+ssh://root@kvm1/system", hypervisor: true}
+#  - {type: openstack, name: cloud, auth_url: https://keystone:5000/v3, application_credential_id: "...",
+#     application_credential_secret_env: OS_APP_SECRET, region: RegionOne}
+#  - {type: kubernetes, name: prod, url: https://k8s-api:6443, token_env: K8S_TOKEN, ca_file: /etc/diysca/k8s-ca.pem}
+#  - {type: openshift, name: ocp, url: https://api.ocp.example.org:6443, token_env: OCP_TOKEN, user: core}
+#  - {type: aws, name: aws-eu, regions: [eu-central-1], access_key_id_env: AWS_ACCESS_KEY_ID,
+#     secret_access_key_env: AWS_SECRET_ACCESS_KEY, filters: {"tag:env": prod}}
+#  - {type: azure, name: az, tenant_id: "...", client_id: "...", client_secret_env: AZURE_CLIENT_SECRET}
+#  - {type: azure, name: az, managed_identity: true}
+#  - {type: gcp, name: gcp, projects: [prod-123], credentials_file: /etc/diysca/gcp-sa.json}
+#  - {type: hetzner, name: hcloud, token_env: HCLOUD_TOKEN, label_selector: "env=prod"}
+# Other clouds (DigitalOcean, OVH, Scaleway): list their Ansible inventory plugin file under inventories.
+
+# Modules (docs/modules.md). Scanning is always on. Default: all of them.
+# modules: [alerting, mitigation, auth]
+
 # SSH (agentless). Per-host ansible_user / ansible_port / ansible_ssh_private_key_file win.
 ssh_user: diysca                  # an unprivileged user is enough, no sudo needed
 # Defaults: ssh-agent and ~/.ssh/id_* + ~/.ssh/known_hosts of the user diysca runs as
@@ -131,3 +152,25 @@ repo_managers: []
 # Let token holders approve and cancel mitigations themselves (default: only people can approve)
 # agents_can_approve: false
 # Hand-off targets (webhook, github, gitlab) are managed under Settings > Hand-off or imported as YAML.
+
+# --- Login, roles and audit (auth module, docs/auth.md) ---
+# OIDC single sign-on: Keycloak, Entra ID, Authentik, Zitadel, Okta, Google, GitLab, Dex, ...
+# oidc:
+#   issuer: https://sso.example.org/realms/acme
+#   client_id: diysca
+#   client_secret_env: DIYSCA_OIDC_SECRET
+#   scopes: [openid, profile, email, groups]
+#   username_claim: preferred_username
+#   groups_claim: groups            # dotted paths work: realm_access.roles
+# Roles: viewer < operator < approver < admin. hosts limits a binding to some systems.
+# rbac:
+#   default_role: ""                # role for users no binding matches ("" = no access)
+#   bindings:
+#     - {group: secops, role: admin}
+#     - {group: dba, role: approver, hosts: "group:db"}
+#     - {email: "*@ops.example.org", role: operator}
+# API tokens with a role and a scope:
+# api_tokens:
+#   ci: {token: "long-random-string", role: operator, hosts: "group:dmz"}
+# session_hours: 8
+# audit_days: 365                   # audit log retention

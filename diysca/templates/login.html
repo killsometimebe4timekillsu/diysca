@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Log in{% endblock %}
+{% block content %}
+<div class="card" style="max-width:520px;margin:40px auto">
+<h2>Log in to diysca</h2>
+{% if error %}<div class="notice bad">{{ error }}</div>{% endif %}
+{% if oidc %}<p><a class="btnlike" href="/login?next={{ next|urlencode }}">Log in with single sign-on</a></p>{% endif %}
+{% if basic %}<p class="muted"><small>Break-glass: the local admin account (web_user) works with HTTP basic auth. Open <a href="{{ next }}">{{ next }}</a> and enter it when the browser asks.</small></p>{% endif %}
+{% if not oidc and not basic %}<p class="muted">No login is configured. See docs/auth.md.</p>{% endif %}
+</div>
+{% endblock %}

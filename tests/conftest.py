@@ -2,8 +2,8 @@ import os
 
 import pytest
 
-from diysca import db
-from diysca.config import settings
+from diysca.core import db
+from diysca.core.config import settings
 
 # Run the suite against PostgreSQL with: DIYSCA_TEST_DATABASE_URL=postgresql://... pytest
 PG_URL = os.environ.get("DIYSCA_TEST_DATABASE_URL", "")

@@ -1,6 +1,6 @@
 import gzip
 
-from diysca.repos import parse_apt_packages, parse_primary_xml
+from diysca.scanning.repos import parse_apt_packages, parse_primary_xml
 
 PRIMARY = b"""<?xml version="1.0"?><metadata xmlns="http://linux.duke.edu/metadata/common" xmlns:rpm="http://linux.duke.edu/metadata/rpm">
 <package type="rpm"><name>openssl-libs</name><arch>x86_64</arch><version epoch="1" ver="3.0.7" rel="27.el9"/>

@@ -8,10 +8,13 @@ import logging
 import os
 import sys
 
-from . import __version__, db, notify, scanner
-from .config import reload, settings
-from .feeds import BulkOSVClient, osv_ecosystem, refresh_kev
-from .sbom import sbom_json
+from diysca import __version__
+from diysca.alerting import notify
+from diysca.core import db
+from diysca.core.config import reload, settings
+from diysca.scanning import scanner
+from diysca.scanning.feeds import BulkOSVClient, refresh_kev
+from diysca.scanning.sbom import sbom_json
 
 
 def main(argv=None):
@@ -28,10 +31,20 @@ def main(argv=None):
     s.add_argument("--port", type=int, default=8765)
 
     s = sp.add_parser("scan", help="scan hosts now")
-    s.add_argument("hosts", nargs="*", help="host names (default: all enabled)")
+    s.add_argument("hosts", nargs="*", help="host names or patterns: web* db1 group:prod !test-* (default: all enabled)")
     s.add_argument("--no-alerts", action="store_true")
 
-    s = sp.add_parser("import", help="import Ansible inventory")
+    s = sp.add_parser("patchlog", help="export the patch log (who patched what, when, approved by whom)")
+    s.add_argument("--range", default="30d", help="24h, 7d, 30d, 90d, 1y or custom (with --from / --to)")
+    s.add_argument("--from", dest="from_", default="")
+    s.add_argument("--to", default="")
+    s.add_argument("--kind", default="", help="playbook, repo, mitigation, reprovision")
+    s.add_argument("--host", default="")
+    s.add_argument("--cve", default="")
+    s.add_argument("--format", choices=["csv", "json"], default="csv")
+    s.add_argument("-o", "--output", default="-", help="file (default: stdout)")
+
+    s = sp.add_parser("import", help="import Ansible inventories and inventory providers")
     s.add_argument("paths", nargs="*", help="inventory files/dirs (default: config inventories)")
 
     s = sp.add_parser("add-host", help="add a host manually")
@@ -126,7 +139,7 @@ def main(argv=None):
     if a.cmd == "serve":
         import uvicorn
 
-        from .web import app
+        from diysca.web import app
         uvicorn.run(app, host=a.host, port=a.port, proxy_headers=True)
     elif a.cmd == "desktop":
         import threading
@@ -134,7 +147,7 @@ def main(argv=None):
 
         import uvicorn
 
-        from .web import app
+        from diysca.web import app
         url = f"http://127.0.0.1:{a.port}/"
         settings.base_url = url.rstrip("/")
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
@@ -145,9 +158,9 @@ def main(argv=None):
         if settings.inventories:
             scanner.import_inventories()
         if a.hosts:
-            ids = [r["id"] for r in db.q(f"SELECT id FROM hosts WHERE name IN ({','.join('?' * len(a.hosts))})", a.hosts)]
+            ids = scanner.select_hosts(a.hosts)
             if not ids:
-                sys.exit("no such host(s)")
+                sys.exit("no system matches " + " ".join(a.hosts))
         if a.no_alerts:
             async def run():
                 await refresh_kev()
@@ -158,6 +171,18 @@ def main(argv=None):
             res = asyncio.run(scanner.scan_all(host_ids=ids))
         for r in res:
             print(json.dumps(r))
+    elif a.cmd == "patchlog":
+        from diysca.mitigation import patchlog
+        d = patchlog.query({"range": a.range, "from": a.from_, "to": a.to, "kind": a.kind, "host": a.host,
+                            "cve": a.cve})
+        text = patchlog.to_csv(d["rows"]) if a.format == "csv" else \
+            patchlog.to_json(d["rows"], {"range": d["range"], "start": d["start"], "end": d["end"]})
+        if a.output == "-":
+            sys.stdout.write(text)
+        else:
+            with open(a.output, "w") as fh:
+                fh.write(text)
+            print(f"{len(d['rows'])} entries -> {a.output}", file=sys.stderr)
     elif a.cmd == "import":
         print(f"imported {scanner.import_inventories(a.paths or None)} hosts")
     elif a.cmd == "add-host":
@@ -213,8 +238,8 @@ def main(argv=None):
     elif a.cmd == "playbook":
         from urllib.parse import parse_qsl
 
-        from . import patch
-        from .web import finding_query
+        from diysca.mitigation import patch
+        from diysca.ui import finding_query
         args = dict(parse_qsl(a.filter))
         args.setdefault("status", "open")
         sql, params = finding_query(args)
@@ -223,7 +248,8 @@ def main(argv=None):
             rows = [r for r in rows if r["host_name"] in a.host]
         text, summary = patch.build_playbook([r["id"] for r in rows])
         if summary["hosts"]:
-            db.patch_run("playbook", f"playbook generated (cli): {summary['hosts']} hosts, {summary['packages']} packages")
+            from diysca.mitigation import patchlog
+            patchlog.record_playbook([r["id"] for r in rows], summary, f"cli:{os.environ.get('USER', 'cli')}")
         if a.output:
             with open(a.output, "w") as fh:
                 fh.write(text)
@@ -231,7 +257,7 @@ def main(argv=None):
         else:
             print(text)
     elif a.cmd == "repo-update":
-        from . import repomgr
+        from diysca.mitigation import repomgr
         if not a.name:
             for m in repomgr.managers():
                 print(f"{m['name']:20} {m.get('type', '?'):8} {m.get('url', '')}  pending: {len(repomgr.pending_for(m))}")
@@ -244,7 +270,7 @@ def main(argv=None):
     elif a.cmd == "notify":
         print(f"sent {asyncio.run(notify.dispatch(dry_run=a.dry_run))} alerts")
     elif a.cmd == "reprovision":
-        from . import reprovision
+        from diysca.mitigation import reprovision
         if a.sbom:
             with open(a.sbom) as fh:
                 text, summary = reprovision.build(json.load(fh), a.mode, a.target)
@@ -260,7 +286,7 @@ def main(argv=None):
         else:
             print(text)
     elif a.cmd == "settings":
-        from . import settings_io
+        from diysca.core import settings_io
         if a.action == "export":
             print(settings_io.export_yaml(a.secrets), end="")
         else:
@@ -270,7 +296,7 @@ def main(argv=None):
             if res["errors"]:
                 sys.exit(1)
     elif a.cmd == "sources":
-        from . import sources
+        from diysca.scanning import sources
         sources.sync_config_sources()
         if a.refresh:
             names = [s["name"] for s in sources.all_sources() if s["enabled"]] if a.refresh == "all" else [a.refresh]
@@ -280,7 +306,7 @@ def main(argv=None):
             print(f"{s['name']:<20} {s['type']:<15} {'on ' if s['enabled'] else 'off'} {s['origin']:<6} "
                   f"{s['count'] or 0:>8} {s['status'] or 'not loaded'} {s['error'] or ''}")
     elif a.cmd == "patched":
-        from . import patched
+        from diysca.mitigation import patched
         d = patched.query({"range": a.range, "from": a.frm, "to": a.to, "host": a.host})
         st = d["stats"]
         print(f"# {d['label']}: {st['cves']} CVEs / {st['findings']} findings patched on {st['systems']} systems, "
@@ -289,14 +315,14 @@ def main(argv=None):
             print(f"{f['resolved_at'][:16]}  {f['host_name']:<20} {f['severity'] or '':<8} {f['vuln_id']:<18} "
                   f"{f['package']} {f['version']} -> {f['resolved_version'] or '-'} ({f['resolution'] or '?'})")
     elif a.cmd == "mcp":
-        from . import mcp
+        from diysca import mcp
         asyncio.run(mcp.serve_stdio(a.actor))
     elif a.cmd == "mitigations":
         _mitigations(a)
 
 
 def _mitigations(a):
-    from . import mitigate
+    from diysca.mitigation import mitigate
     try:
         if a.action == "list":
             for m in mitigate.list_(a.status or "open"):
@@ -307,7 +333,7 @@ def _mitigations(a):
         if a.action == "approve":
             ids = [int(i) for i in a.ids.split(",") if i.strip()]
             if not ids and a.filter:
-                from .web import _ids_from_filter
+                from diysca.ui import _ids_from_filter
                 ids = _ids_from_filter(a.filter)
             m = mitigate.approve(ids, a.by, a.note, a.handoff or None)
             print(f"mitigation #{m['id']} approved: {len(m['findings'])} findings on {', '.join(m['hosts'])}")

@@ -13,8 +13,17 @@
 {{ m.saved_bar(page, query_string, saved_filters) }}
 </div>
 <div class="card">
-<table><tr><th>System</th><th>Address</th><th>Groups</th><th>OS</th><th>Pkgs</th><th>Repos</th><th>Open</th><th>High+</th><th>Fix in repo</th><th>Last scan</th><th></th></tr>
+{% if not user or user.can('operator') %}<form id="scansel" method="post" action="/scan" class="filters">
+  <input type="hidden" name="selected" value="1"><input type="hidden" name="back" value="/systems{{ '?' ~ query_string if query_string }}">
+  <button>Scan selected</button> <span class="muted" id="selcount">0 selected</span>
+</form>
+<form method="post" action="/scan" class="inline"><input type="hidden" name="back" value="/systems{{ '?' ~ query_string if query_string }}">
+  {% for h in hosts %}<input type="hidden" name="host_id" value="{{ h.id }}">{% endfor %}
+  {% if query_string %}<button class="secondary" {{ 'disabled' if not hosts }}>Scan all {{ hosts|length }} in this filter</button>{% endif %}
+</form>{% endif %}
+<table><tr><th><input type="checkbox" title="select all" onclick="document.querySelectorAll('.hsel').forEach(c=>{c.checked=this.checked});selcount()"></th><th>System</th><th>Address</th><th>Groups</th><th>OS</th><th>Pkgs</th><th>Repos</th><th>Open</th><th>High+</th><th>Fix in repo</th><th>Last scan</th><th></th></tr>
 {% for h in hosts %}<tr>
+<td><input type="checkbox" class="hsel" form="scansel" name="host_id" value="{{ h.id }}" onchange="selcount()"></td>
 <td><a href="/systems/{{ h.id }}">{{ h.name }}</a>{% if h.kind=='container' %} <span class="tag" title="{{ h.image }}">container</span>{% endif %}{% if not h.enabled %} <span class="tag">disabled</span>{% endif %}</td>
 <td class="mono">{{ h.ssh_user ~ '@' if h.ssh_user }}{{ h.address }}{{ ':' ~ h.port if h.port and h.port != 22 }} {% if h.connection=='local' %}<span class="tag">local</span>{% endif %}</td>
 <td>{% for g in (h.groups or '').split(',') if g %}<a class="tag" href="/systems?group={{ g }}">{{ g }}</a>{% endfor %}</td>
@@ -23,7 +32,7 @@
 <td class="{{ 'bad' if h.last_status=='error' }}" title="{{ h.last_error or '' }}">{{ (h.last_scan or 'never')[:16] }} {{ h.last_status or '' }}</td>
 <td style="white-space:nowrap"><form method="post" action="/systems/{{ h.id }}/scan" class="inline"><button class="secondary">Scan</button></form>
 <form method="post" action="/systems/{{ h.id }}/toggle" class="inline"><button class="secondary">{{ 'Disable' if h.enabled else 'Enable' }}</button></form></td>
-</tr>{% else %}<tr><td colspan="11" class="muted">No systems match.</td></tr>{% endfor %}
+</tr>{% else %}<tr><td colspan="12" class="muted">No systems match.</td></tr>{% endfor %}
 </table></div>
 <div class="row">
 <div class="card"><h2>Import Ansible inventory</h2>
@@ -39,4 +48,5 @@
   <label>Connection<select name="connection"><option>ssh</option><option>local</option></select></label>
   <button>Add</button></form></div>
 </div>
+<script>function selcount(){var n=document.querySelectorAll('.hsel:checked').length;var e=document.getElementById('selcount');if(e)e.textContent=n+' selected'}</script>
 {% endblock %}

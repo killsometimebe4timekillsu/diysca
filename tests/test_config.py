@@ -1,4 +1,4 @@
-from diysca.config import default_data_dir, load_settings
+from diysca.core.config import default_data_dir, load_settings
 
 
 def test_data_dir_defaults(monkeypatch, tmp_path):

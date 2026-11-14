@@ -24,9 +24,9 @@
 {{ m.saved_bar(page, query_string, saved_filters) }}
 </div>
 <div class="card"><p class="muted">{{ rows|length }} findings · <a href="/api/findings?{{ query_string }}">JSON</a></p>
-<form id="patchform" method="post" action="/patch/playbook" class="inline"><button>Patch playbook for selected</button></form>
-<form method="post" action="/patch/playbook" class="inline"><input type="hidden" name="filter" value="{{ query_string }}"><button class="secondary">Patch playbook for everything in this filter</button></form>
-<details class="approve"><summary class="btnlike">Approve for mitigation…</summary>
+<form id="patchform" method="post" action="/patch/playbook" class="inline">{% if has_module('mitigation') %}<button>Patch playbook for selected</button>{% endif %}</form>
+{% if has_module('mitigation') %}<form method="post" action="/patch/playbook" class="inline"><input type="hidden" name="filter" value="{{ query_string }}"><button class="secondary">Patch playbook for everything in this filter</button></form>{% endif %}
+{% if has_module('mitigation') and (not user or user.can('approver')) %}<details class="approve"><summary class="btnlike">Approve for mitigation…</summary>
 <div class="filters" style="margin-top:8px">
   <label>Note<input name="note" form="patchform" size="40" placeholder="e.g. change CHG-1234, maintenance window Sat 22:00"></label>
   <label>Hand off to<select name="handoff" form="patchform"><option value="">{{ 'auto targets / agents pull it' if handoffs else 'agents pull it (API / MCP)' }}</option>{% for h in handoffs %}<option>{{ h.name }}</option>{% endfor %}</select></label>
@@ -35,7 +35,7 @@
   <form method="post" action="/mitigations" class="inline"><input type="hidden" name="filter" value="{{ query_string }}"><button class="secondary">Approve everything in this filter</button></form>
 </div>
 <p class="muted"><small>Approving hands the findings and a ready playbook to whoever can reach the systems: an agent or CI/CD job (pull via the API or MCP, or pushed to a <a href="/settings/handoff">hand-off target</a>), or a colleague. They report back, and the systems are rescanned when it's done.</small></p>
-</details>
+</details>{% endif %}
 <table><tr><th><input type="checkbox" onclick="document.querySelectorAll('input[form=patchform]').forEach(c=>c.checked=this.checked)"></th><th>Severity</th><th>CVE</th><th>System</th><th>Package</th><th>Installed</th><th>Fixed in</th><th>Your repos offer</th><th>Status</th><th></th></tr>
 {% for f in rows %}<tr>
 <td><input type="checkbox" name="ids" value="{{ f.id }}" form="patchform"></td>

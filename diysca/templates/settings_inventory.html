@@ -1,0 +1,42 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+{{ m.settings_tabs(tab) }}
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<div class="card"><h2>Inventory sources
+  <span style="float:right;font-weight:400"><form method="post" action="/settings/inventory/import" class="inline"><button class="sm">Import now</button></form></span></h2>
+<p class="muted">Systems come from Ansible inventories and from inventory providers (hypervisors, clouds, clusters). All of them are re-read before every scheduled scan. Providers are set under <span class="mono">inventory_providers:</span> in config.yml, with secrets in environment variables (<span class="mono">*_env</span>) or files (<span class="mono">*_file</span>).</p>
+<div class="scroll"><table><tr><th>Source</th><th>Type</th><th>Where</th><th>Systems</th><th>Last read</th><th>Result</th></tr>
+{% for s in rows %}<tr>
+<td class="mono">{{ s.label }}</td><td>{{ s.type }}</td><td class="mono">{{ s.where }}</td>
+<td><a href="/systems?host=&group={{ s.group }}">{{ s.count }}</a></td>
+<td class="mono">{{ (s.status.at or '–')[:16]|replace('T',' ') }}</td>
+<td class="{{ 'ok' if s.status.ok else 'bad' if s.status.at else 'muted' }}">{% if s.status.at %}{{ (s.status.hosts ~ ' found') if s.status.ok else s.status.error }}{% else %}not read since start{% endif %}</td>
+</tr>{% else %}<tr><td colspan="6" class="muted">No inventories or providers configured. Systems added by hand are still scanned.</td></tr>{% endfor %}
+</table></div></div>
+<div class="card"><h2>Providers</h2>
+<table><tr><th>Type</th><th>Finds</th></tr>
+<tr><td class="mono">proxmox</td><td>QEMU VMs and LXC containers of a Proxmox VE cluster, optionally the PVE nodes</td></tr>
+<tr><td class="mono">vsphere</td><td>VMs of a vCenter (REST API, VMware Tools for IP and OS family)</td></tr>
+<tr><td class="mono">libvirt / kvm</td><td>KVM domains of libvirt hosts, local or qemu+ssh://, optionally the hypervisor</td></tr>
+<tr><td class="mono">openstack</td><td>Nova servers of a project (Keystone v3, application credential or password)</td></tr>
+<tr><td class="mono">kubernetes / openshift</td><td>Cluster nodes; their running containers are found with crictl and scanned per image</td></tr>
+<tr><td class="mono">aws</td><td>EC2 instances of one or more regions</td></tr>
+<tr><td class="mono">azure</td><td>VMs of your subscriptions (Resource Graph; service principal or managed identity)</td></tr>
+<tr><td class="mono">gcp</td><td>Compute Engine instances of your projects (service account key or the GCE metadata server)</td></tr>
+<tr><td class="mono">hetzner</td><td>Hetzner Cloud servers of a project</td></tr>
+<tr><td>DigitalOcean, OVH, Scaleway, …</td><td>Ansible inventory plugins listed under <span class="mono">inventories:</span></td></tr>
+</table>
+<p class="muted">Windows systems (any provider puts them in the <span class="mono">windows</span> group) are inventoried over OpenSSH: build, installed updates and programs. CVE matching against Microsoft's security updates isn't built yet.</p>
+<pre class="mono">inventory_providers:
+  - {type: proxmox, name: pve, url: https://pve1:8006, token_id: "diysca@pve!scan", token_secret_env: PVE_TOKEN, user: root}
+  - {type: vsphere, name: vc, url: https://vcenter.example.org, username: ro@vsphere.local, password_env: VC_PW}
+  - {type: libvirt, name: kvm1, uri: "qemu+ssh://root@kvm1/system"}
+  - {type: openstack, name: cloud, auth_url: https://keystone:5000/v3, application_credential_id: "…", application_credential_secret_env: OS_SECRET}
+  - {type: openshift, name: ocp, url: https://api.ocp.example.org:6443, token_env: OCP_TOKEN, user: core}
+  - {type: aws, name: aws-eu, regions: [eu-central-1], access_key_id_env: AWS_ACCESS_KEY_ID, secret_access_key_env: AWS_SECRET_ACCESS_KEY}
+  - {type: azure, name: az, tenant_id: "…", client_id: "…", client_secret_env: AZURE_CLIENT_SECRET}
+  - {type: gcp, name: gcp, projects: [prod-123], credentials_file: /etc/diysca/gcp-sa.json}
+  - {type: hetzner, name: hcloud, token_env: HCLOUD_TOKEN}</pre>
+</div>
+{% endblock %}

@@ -10,7 +10,7 @@
 {% if f.epss is not none %} · EPSS <b>{{ '%.1f'|format(f.epss * 100) }}%</b> chance of exploitation in the next 30 days{% endif %}</p>
 <p><b>What to do:</b> {{ hint }}</p>
 {% if mitigation %}<p>Approved for mitigation in <a href="/mitigations/{{ mitigation.id }}">#{{ mitigation.id }}</a> by {{ mitigation.approved_by }} · <b>{{ mitigation.status }}</b>{% if mitigation.claimed_by %} · {{ mitigation.claimed_by }}{% endif %}</p>{% endif %}
-{% if f.status == 'open' and (not mitigation or mitigation.status not in ('approved','claimed','running')) %}
+{% if has_module('mitigation') and (not user or user.can('approver')) and f.status == 'open' and (not mitigation or mitigation.status not in ('approved','claimed','running')) %}
 <form method="post" action="/mitigations" class="filters"><input type="hidden" name="finding_id" value="{{ f.id }}">
   <label>Note<input name="note" size="40" placeholder="optional"></label>
   <label>Hand off to<select name="handoff"><option value="">{{ 'auto targets / agents pull it' if handoffs else 'agents pull it (API / MCP)' }}</option>{% for h in handoffs %}<option>{{ h.name }}</option>{% endfor %}</select></label>

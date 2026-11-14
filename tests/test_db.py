@@ -1,4 +1,4 @@
-from diysca import db
+from diysca.core import db
 
 
 def test_to_pg():

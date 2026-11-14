@@ -4,9 +4,10 @@ import json
 import httpx
 import yaml
 
-from diysca import db, repomgr
-from diysca.config import settings
-from diysca.patch import build_playbook
+from diysca.core import db
+from diysca.core.config import settings
+from diysca.mitigation import repomgr
+from diysca.mitigation.patch import build_playbook
 
 
 def _setup():
