@@ -13,33 +13,36 @@ permissions:
 jobs:
   standalone:
     name: native packages (deb, rpm) + AppImage
-    runs-on: ubuntu-22.04   # older glibc => binaries run on more distros
+    runs-on: ubuntu-latest
+    # Build on EL8 (glibc 2.28) so the bundle runs on RHEL/Rocky/Alma 8+, Debian 10+, Ubuntu 20.04+.
+    container: docker.io/library/almalinux:8
     steps:
+      - name: build deps
+        run: |
+          dnf install -y -q python3.12 python3.12-devel binutils git file findutils tar gzip
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with: { python-version: "3.12" }
       - name: version
-        run: echo "VERSION=$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')" >> "$GITHUB_ENV"
+        run: echo "VERSION=$(python3.12 -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')" >> "$GITHUB_ENV"
       - name: standalone bundle
-        run: PYTHON=python packaging/scripts/build-standalone.sh
+        run: PYTHON=python3.12 packaging/scripts/build-standalone.sh
       - name: nfpm
         run: |
-          curl -fsSL -o /tmp/nfpm.deb https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_amd64.deb
-          sudo dpkg -i /tmp/nfpm.deb
+          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_Linux_x86_64.tar.gz | tar -xz -C /usr/local/bin nfpm
       - name: deb + rpm
         run: |
           ARCH=amd64 nfpm package -f packaging/nfpm.yaml -p deb -t dist/
           ARCH=amd64 nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
       - name: AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq libfuse2
-          mkdir -p "$HOME/bin"
-          curl -fsSL -o "$HOME/bin/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
-          chmod +x "$HOME/bin/appimagetool"
-          PATH="$HOME/bin:$PATH" packaging/scripts/build-appimage.sh
+          curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /usr/local/bin/appimagetool
+          packaging/scripts/build-appimage.sh
       - name: smoke test AppImage
-        run: |
-          APPIMAGE_EXTRACT_AND_RUN=1 ./dist/diysca-*.AppImage --version
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: ./dist/diysca-*.AppImage --version
       - uses: actions/upload-artifact@v4
         with:
           name: native
@@ -52,8 +55,9 @@ jobs:
     needs: standalone
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        image: ["debian:12", "ubuntu:24.04"]
+        image: ["debian:12", "ubuntu:22.04", "ubuntu:24.04"]
     container: ${{ matrix.image }}
     steps:
       - uses: actions/download-artifact@v4
@@ -70,8 +74,9 @@ jobs:
     needs: standalone
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
-        image: ["rockylinux:9", "almalinux:9"]
+        image: ["rockylinux:9", "almalinux:8"]
     container: ${{ matrix.image }}
     steps:
       - uses: actions/download-artifact@v4
@@ -104,13 +109,14 @@ jobs:
         run: buildah bud --format oci -t diysca:ci -f Containerfile .
       - name: smoke test (podman)
         run: |
-          podman run -d --name diysca -p 8080:8080 diysca:ci
+          # host networking: the smoke test is about the image, not the runner's rootless port forwarding
+          podman run -d --name diysca --network host diysca:ci
           ok=
-          for i in $(seq 1 60); do curl -fsS localhost:8080/healthz && { ok=1; break; }; sleep 1; done
+          for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/healthz && { ok=1; break; }; sleep 1; done
           podman ps -a
           podman logs diysca
           test -n "$ok"
-          curl -fsS localhost:8080/findings >/dev/null
+          curl -fsS http://127.0.0.1:8080/findings >/dev/null
           podman exec diysca diysca --version
           podman rm -f diysca
       - name: push to ghcr.io
