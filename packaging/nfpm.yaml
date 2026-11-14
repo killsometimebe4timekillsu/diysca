@@ -18,8 +18,9 @@ vendor: diysca
 homepage: https://github.com/killsometimebe4timekillsu/diysca
 license: MIT
 contents:
-  - src: dist/diysca/
-    dst: /opt/diysca/
+  - src: dist/diysca
+    dst: /opt/diysca
+    type: tree
   - src: /opt/diysca/diysca
     dst: /usr/bin/diysca
     type: symlink
