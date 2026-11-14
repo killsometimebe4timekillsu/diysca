@@ -135,7 +135,9 @@ async def dispatch(host_id: int | None = None, dry_run: bool = False) -> int:
                 continue
             ok, err = await send_to_channel(ch, title, body, worst)
             for f in fs:
-                db.x("INSERT OR REPLACE INTO notifications VALUES (?,?,?,?,?)", (f["id"], cid, db.now(), int(ok), err))
+                db.x("""INSERT INTO notifications VALUES (?,?,?,?,?) ON CONFLICT(finding_id, channel_id)
+                        DO UPDATE SET sent_at=excluded.sent_at, ok=excluded.ok, error=excluded.error""",
+                     (f["id"], cid, db.now(), int(ok), err))
             if ok:
                 count += len(fs)
             else:

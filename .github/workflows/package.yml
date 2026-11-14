@@ -76,17 +76,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: ["rockylinux:9", "almalinux:8"]
+        include:
+          - { image: "docker.io/library/almalinux:8", install: "dnf install -y ./diysca-*.rpm" }
+          - { image: "docker.io/library/rockylinux:9", install: "dnf install -y ./diysca-*.rpm" }
+          - { image: "registry.access.redhat.com/ubi10/ubi:latest", install: "dnf install -y ./diysca-*.rpm" }
+          - { image: "registry.suse.com/bci/bci-base:16.0", install: "zypper --non-interactive install --allow-unsigned-rpm ./diysca-*.rpm" }
     container: ${{ matrix.image }}
     steps:
       - uses: actions/download-artifact@v4
         with: { name: native }
-      - run: |
-          dnf install -y ./diysca-*.rpm
+      - name: install and smoke test
+        run: |
+          cat /etc/os-release | head -3
+          ${{ matrix.install }}
           diysca --version
           getent passwd diysca
+          test -f /etc/diysca/config.yml && test -f /usr/lib/systemd/system/diysca.service
           DIYSCA_DATA_DIR=/tmp/d diysca add-host self --local
-          DIYSCA_DATA_DIR=/tmp/d DIYSCA_REPO_FETCH=off DIYSCA_NVD_ENABLED=0 DIYSCA_KEV_ENABLED=0 DIYSCA_OSV_MODE=bulk diysca scan --no-alerts
+          DIYSCA_DATA_DIR=/tmp/d DIYSCA_REPO_FETCH=scanner DIYSCA_NVD_ENABLED=0 DIYSCA_KEV_ENABLED=0 DIYSCA_OSV_MODE=bulk diysca scan --no-alerts | tee /tmp/scan.json
+          DIYSCA_DATA_DIR=/tmp/d diysca hosts
+          # the scan itself must succeed (feed coverage for a brand-new release may still be partial)
+          ! grep -q '"error": "no package manager' /tmp/scan.json
+          DIYSCA_DATA_DIR=/tmp/d diysca sbom self | head -c 400
 
   flatpak:
     runs-on: ubuntu-latest
