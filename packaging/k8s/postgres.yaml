@@ -1,0 +1,43 @@
+# Minimal single-instance PostgreSQL. Point DIYSCA_DATABASE_URL at your own
+# cluster (CloudNativePG, managed DB, ...) instead and drop this file from kustomization.yaml if you have one.
+apiVersion: v1
+kind: Service
+metadata:
+  name: diysca-db
+spec:
+  selector: { app: diysca-db }
+  ports: [{ port: 5432, targetPort: 5432 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: diysca-db
+spec:
+  serviceName: diysca-db
+  replicas: 1
+  selector:
+    matchLabels: { app: diysca-db }
+  template:
+    metadata:
+      labels: { app: diysca-db }
+    spec:
+      securityContext: { fsGroup: 999, runAsUser: 999, runAsNonRoot: true }
+      containers:
+        - name: postgres
+          image: docker.io/library/postgres:17
+          env:
+            - { name: POSTGRES_USER, value: diysca }
+            - { name: POSTGRES_DB, value: diysca }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: diysca-db, key: password } }
+          ports: [{ containerPort: 5432 }]
+          readinessProbe: { exec: { command: [pg_isready, -U, diysca] }, periodSeconds: 5 }
+          volumeMounts: [{ name: data, mountPath: /var/lib/postgresql/data }]
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: { requests: { storage: 10Gi } }

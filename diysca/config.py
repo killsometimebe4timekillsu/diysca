@@ -48,6 +48,8 @@ class Settings:
     http_timeout: float = 60
     http_proxy_ca: str = ""  # optional CA bundle for egress proxies
 
+    repo_managers: list = field(default_factory=list)  # aptly / pulp / foreman, see config.example.yml
+
     web_user: str = ""  # set both to enable HTTP basic auth
     web_password: str = ""
     base_url: str = "http://localhost:8080"

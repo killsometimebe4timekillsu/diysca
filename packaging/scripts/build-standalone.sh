@@ -10,6 +10,7 @@ build/venv/bin/pip install --quiet ".[zstd]" pyinstaller
 build/venv/bin/python -m PyInstaller --noconfirm --clean --onedir --name diysca \
   --collect-submodules apprise --collect-data apprise \
   --collect-submodules uvicorn --collect-submodules asyncssh \
+  --collect-submodules psycopg --collect-all psycopg_binary \
   --collect-data diysca --hidden-import diysca.web \
   --exclude-module tkinter --exclude-module PIL --exclude-module numpy --exclude-module scipy \
   --distpath dist --workpath build/pyinstaller --specpath build/pyinstaller \

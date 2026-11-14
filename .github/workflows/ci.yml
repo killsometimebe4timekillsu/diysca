@@ -2,7 +2,24 @@ name: ci
 on: [push, pull_request]
 jobs:
   test:
+    name: test (${{ matrix.db }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        db: [postgres, sqlite]
+    services:
+      postgres:
+        image: docker.io/library/postgres:17
+        env:
+          POSTGRES_USER: diysca
+          POSTGRES_PASSWORD: diysca
+          POSTGRES_DB: diysca
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U diysca" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DIYSCA_TEST_DATABASE_URL: ${{ matrix.db == 'postgres' && 'postgresql://diysca:diysca@localhost:5432/diysca' || '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

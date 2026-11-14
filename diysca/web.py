@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, db, notify, scanner
+from . import __version__, db, notify, patch, repomgr, scanner
 from .config import settings
 from .feeds import SEVERITY_ORDER, sev_rank
 from .sbom import build_sbom, sbom_json
@@ -77,6 +77,9 @@ def host_filter(args: dict, alias="h"):
     if args.get("os"):
         where.append(f"({alias}.os_pretty LIKE ? OR {alias}.os_id LIKE ?)")
         p += [_like(args["os"])] * 2
+    if args.get("kind") in ("host", "container"):
+        where.append(f"{alias}.kind=?")
+        p.append(args["kind"])
     return where, p
 
 
@@ -104,6 +107,14 @@ def finding_query(args: dict):
         where.append("f.fixed_version IS NULL")
     if args.get("kev"):
         where.append("f.kev=1")
+    eco = args.get("eco")
+    if eco == "os":
+        where.append("f.ecosystem=''")
+    elif eco == "lang":
+        where.append("f.ecosystem!=''")
+    elif eco:
+        where.append("f.ecosystem=?")
+        p.append(eco)
     sql = f"""SELECT f.*, h.name AS host_name, h.groups AS host_groups FROM findings f JOIN hosts h ON h.id=f.host_id
               WHERE {' AND '.join(where)}
               ORDER BY f.kev DESC, CASE f.severity WHEN 'CRITICAL' THEN 5 WHEN 'HIGH' THEN 4 WHEN 'MEDIUM' THEN 3
@@ -122,11 +133,19 @@ def package_query(args: dict):
     if args.get("vulnerable"):
         where.append("""EXISTS(SELECT 1 FROM findings f WHERE f.host_id=pk.host_id AND f.status='open'
                          AND (f.package=pk.source_name OR f.package=pk.name))""")
+    eco = args.get("eco")
+    if eco == "os":
+        where.append("pk.ecosystem=''")
+    elif eco == "lang":
+        where.append("pk.ecosystem!=''")
+    elif eco:
+        where.append("pk.ecosystem=?")
+        p.append(eco)
     if args.get("upgradable"):
         where.append("pk.repo_version IS NOT NULL AND pk.repo_version != pk.version")
     sql = f"""SELECT pk.*, h.name AS host_name,
                 (SELECT COUNT(*) FROM findings f WHERE f.host_id=pk.host_id AND f.status='open'
-                   AND (f.package=pk.source_name OR f.package=pk.name)) AS vuln_count
+                   AND f.ecosystem=pk.ecosystem AND (f.package=pk.source_name OR f.package=pk.name)) AS vuln_count
               FROM packages pk JOIN hosts h ON h.id=pk.host_id WHERE {' AND '.join(where)}
               ORDER BY pk.name, h.name LIMIT 5000"""
     return sql, p
@@ -192,7 +211,7 @@ def system_detail(request: Request, host_id: int):
     findings = db.q(fsql, [host_id] + fp)
     repos = db.q("SELECT * FROM repos WHERE host_id=? ORDER BY kind, url", (host_id,))
     pkgs = db.q("""SELECT pk.*, (SELECT COUNT(*) FROM findings f WHERE f.host_id=pk.host_id AND f.status='open'
-                     AND (f.package=pk.source_name OR f.package=pk.name)) AS vuln_count
+                     AND f.ecosystem=pk.ecosystem AND (f.package=pk.source_name OR f.package=pk.name)) AS vuln_count
                    FROM packages pk WHERE host_id=? AND (pk.name LIKE ? OR pk.source_name LIKE ?) ORDER BY vuln_count DESC, name""",
                 (host_id, _like(args.get("pkg", "")), _like(args.get("pkg", ""))))
     return render(request, "system.html", h=h, findings=findings, repos=repos, pkgs=pkgs, args=args)
@@ -370,6 +389,67 @@ def save_filter(name: str = Form(...), page: str = Form(...), query: str = Form(
 def del_filter(fid: int, back: str = Form("/")):
     db.x("DELETE FROM saved_filters WHERE id=?", (fid,))
     return RedirectResponse(back, 303)
+
+
+# ------------------------------------------------------------- patching
+def _patching_ctx() -> dict:
+    hosts = db.q("""SELECT h.id, h.name, h.os_pretty, h.kind,
+                      SUM(CASE WHEN f.fix_in_repo=1 AND f.ecosystem='' THEN 1 ELSE 0 END) AS fixable,
+                      SUM(CASE WHEN f.fix_in_repo=0 AND f.fixed_version IS NOT NULL AND f.ecosystem='' THEN 1 ELSE 0 END) AS repo_behind,
+                      SUM(CASE WHEN f.ecosystem!='' THEN 1 ELSE 0 END) AS lang
+                    FROM hosts h JOIN findings f ON f.host_id=h.id AND f.status='open'
+                    GROUP BY h.id, h.name, h.os_pretty, h.kind ORDER BY fixable DESC, h.name""")
+    mgrs = []
+    for m in repomgr.managers():
+        pend = repomgr.pending_for(m)
+        mgrs.append({"name": m["name"], "type": m.get("type"), "url": m.get("url"), "match": m.get("match"),
+                     "stages": m.get("promote_to") or [], "pending": pend[:50], "pending_count": len(pend)})
+    return {"hosts": hosts, "mgrs": mgrs, "result": None}
+
+
+@app.get("/patching")
+def patching(request: Request):
+    return render(request, "patching.html", **_patching_ctx())
+
+
+def _ids_from_filter(query: str) -> list[int]:
+    from urllib.parse import parse_qsl
+    args = dict(parse_qsl(query))
+    args.setdefault("status", "open")
+    sql, p = finding_query(args)
+    return [r["id"] for r in db.q(sql, p)]
+
+
+@app.post("/patch/playbook")
+async def patch_playbook(request: Request):
+    form = await request.form()
+    ids = [int(i) for i in form.getlist("ids") if str(i).isdigit()]
+    if not ids and form.get("filter") is not None:
+        ids = _ids_from_filter(str(form.get("filter")))
+    if form.get("host_id"):
+        ids = [r["id"] for r in db.q("SELECT id FROM findings WHERE host_id=? AND status='open'",
+                                     (int(form.get("host_id")),))]
+    text, summary = patch.build_playbook(ids)
+    db.event("patch", f"playbook generated: {summary['hosts']} hosts, {summary['packages']} packages, "
+                      f"{summary['manual']} manual items")
+    return Response(text, media_type="application/x-yaml",
+                    headers={"Content-Disposition": 'attachment; filename="diysca-patch.yml"'})
+
+
+@app.post("/repos/{name}/run")
+async def repo_run(request: Request, name: str):
+    form = await request.form()
+    dry = form.get("dry_run", "1") == "1"
+    stages = form.getlist("stages") if form.get("stages_given") else None
+    try:
+        res = await repomgr.run(name, dry_run=dry, stages=stages)
+    except KeyError:
+        raise HTTPException(404)
+    if not dry and res.ok and form.get("rescan"):
+        ids = sorted({db.q1("SELECT id FROM hosts WHERE name=?", (p["host_name"],))["id"]
+                      for p in repomgr.pending_for(repomgr.get_manager(name))})
+        _bg_run(scanner.scan_all(host_ids=ids or None))
+    return render(request, "patching.html", **{**_patching_ctx(), "result": res})
 
 
 # ------------------------------------------------------------------ API

@@ -1,12 +1,15 @@
-# Podman Quadlet: copy to /etc/containers/systemd/ (or ~/.config/containers/systemd/),
+# Podman Quadlet: copy diysca.container, diysca-db.container and diysca.network to /etc/containers/systemd/ (or ~/.config/containers/systemd/),
 # then: systemctl daemon-reload && systemctl start diysca
 [Unit]
 Description=diysca CVE scanner
-After=network-online.target
+After=network-online.target diysca-db.service
+Requires=diysca-db.service
 
 [Container]
 Image=ghcr.io/killsometimebe4timekillsu/diysca:latest
 ContainerName=diysca
+Network=diysca.network
+EnvironmentFile=/etc/diysca/db.env
 PublishPort=127.0.0.1:8080:8080
 Volume=diysca-data:/data
 Volume=/etc/diysca:/config:ro,Z

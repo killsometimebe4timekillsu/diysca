@@ -65,6 +65,16 @@ def main(argv=None):
     s.add_argument("--only-kev", action="store_true")
     s.add_argument("--only-fixable", action="store_true")
 
+    s = sp.add_parser("playbook", help="generate an Ansible patch playbook")
+    s.add_argument("--host", action="append", help="only these hosts (repeatable)")
+    s.add_argument("--filter", default="fix=repo", help="findings filter like the UI, e.g. 'fix=repo&severity=HIGH'")
+    s.add_argument("-o", "--output", help="write to file instead of stdout")
+
+    s = sp.add_parser("repo-update", help="sync/publish/promote a self-hosted repo (aptly, pulp, foreman)")
+    s.add_argument("name", nargs="?", help="repo manager name from config (omit to list them)")
+    s.add_argument("--run", action="store_true", help="really do it (default is a dry run)")
+    s.add_argument("--stage", action="append", help="Foreman lifecycle environment(s) to promote to")
+
     s = sp.add_parser("notify", help="send pending alerts")
     s.add_argument("--dry-run", action="store_true")
 
@@ -161,6 +171,35 @@ def main(argv=None):
                 VALUES (?,?,?,?,?,?,?)""", (a.name, ch["id"], a.hosts, a.packages, a.min_severity.upper(),
                                             int(a.only_kev), int(a.only_fixable)))
         print("ok")
+    elif a.cmd == "playbook":
+        from urllib.parse import parse_qsl
+
+        from . import patch
+        from .web import finding_query
+        args = dict(parse_qsl(a.filter))
+        args.setdefault("status", "open")
+        sql, params = finding_query(args)
+        rows = db.q(sql, params)
+        if a.host:
+            rows = [r for r in rows if r["host_name"] in a.host]
+        text, summary = patch.build_playbook([r["id"] for r in rows])
+        if a.output:
+            with open(a.output, "w") as fh:
+                fh.write(text)
+            print(f"wrote {a.output}: {summary}", file=sys.stderr)
+        else:
+            print(text)
+    elif a.cmd == "repo-update":
+        from . import repomgr
+        if not a.name:
+            for m in repomgr.managers():
+                print(f"{m['name']:20} {m.get('type', '?'):8} {m.get('url', '')}  pending: {len(repomgr.pending_for(m))}")
+            return
+        res = asyncio.run(repomgr.run(a.name, dry_run=not a.run, stages=a.stage))
+        for st in res.steps:
+            print(f"[{st.status:7}] {st.action}: {st.detail} {st.info}")
+        if not res.ok:
+            sys.exit(1)
     elif a.cmd == "notify":
         print(f"sent {asyncio.run(notify.dispatch(dry_run=a.dry_run))} alerts")
 
