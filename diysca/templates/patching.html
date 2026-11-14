@@ -1,0 +1,40 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Patching{% endblock %}
+{% block content %}
+<h1>Patching</h1>
+{% if result %}
+<div class="card"><h2>{{ 'Dry run' if result.dry_run else 'Run' }}: {{ result.manager }} <span class="{{ 'ok' if result.ok else 'bad' }}">{{ 'OK' if result.ok else 'FAILED' }}</span></h2>
+<table><tr><th>Step</th><th>Detail</th><th>Status</th><th>Info</th></tr>
+{% for s in result.steps %}<tr><td>{{ s.action }}</td><td class="mono">{{ s.detail }}</td>
+<td class="{{ 'ok' if s.status=='ok' else ('bad' if s.status=='failed' else 'muted') }}">{{ s.status }}</td><td class="mono"><small>{{ s.info }}</small></td></tr>{% endfor %}
+</table></div>
+{% endif %}
+
+<div class="card"><h2>1. Upgrade hosts (Ansible playbook)</h2>
+<p class="muted">Pins every affected package to the version your repos already offer. Language packages, container images and fixes that aren't in your repos yet are listed as comments in the playbook. You can also select individual findings on the <a href="/findings?fix=repo">Findings</a> page.</p>
+<form method="post" action="/patch/playbook" class="inline"><input type="hidden" name="filter" value="fix=repo"><button>Playbook for all findings fixable from your repos</button></form>
+<table style="margin-top:10px"><tr><th>System</th><th>OS</th><th>Fixable now</th><th>Repo behind</th><th>Language pkgs</th><th></th></tr>
+{% for h in hosts %}<tr><td><a href="/systems/{{ h.id }}">{{ h.name }}</a>{% if h.kind=='container' %} <span class="tag">container</span>{% endif %}</td><td>{{ h.os_pretty or '' }}</td>
+<td><a class="ok" href="/findings?host={{ h.name }}&fix=repo">{{ h.fixable }}</a></td>
+<td><a class="bad" href="/findings?host={{ h.name }}&fix=upstream">{{ h.repo_behind }}</a></td>
+<td><a href="/findings?host={{ h.name }}">{{ h.lang }}</a></td>
+<td>{% if h.fixable and h.kind != 'container' %}<form method="post" action="/patch/playbook" class="inline"><input type="hidden" name="host_id" value="{{ h.id }}"><button class="secondary">Playbook</button></form>{% endif %}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No open findings.</td></tr>{% endfor %}</table></div>
+
+<div class="card"><h2>2. Update self-hosted repositories</h2>
+<p class="muted">If a fix is released upstream but your mirror doesn't have it yet, sync the mirror and roll it out: aptly (mirror update → snapshot → publish switch), Pulp 3 (sync → publication → distribution) or Foreman/Katello (sync → publish content view → promote to stages). Configure them under <span class="mono">repo_managers</span> in the config file. Always run the dry run first.</p>
+{% for mg in mgrs %}
+<div class="card" style="margin:10px 0">
+<h2>{{ mg.name }} <span class="tag">{{ mg.type }}</span> <span class="muted mono" style="font-size:12px">{{ mg.url }}</span></h2>
+<p>{{ mg.pending_count }} open finding(s) on hosts using this repo have a released fix that the repo doesn't offer yet.</p>
+{% if mg.pending %}<details><summary>show</summary><table>{% for p in mg.pending %}<tr><td>{{ m.sev(p.severity) }}</td><td>{{ p.vuln_id }}</td><td>{{ p.host_name }}</td><td>{{ p.package }} {{ p.version }} → {{ p.fixed_version }}</td><td class="muted">repo has {{ p.repo_version or '–' }}</td></tr>{% endfor %}</table></details>{% endif %}
+<form method="post" action="/repos/{{ mg.name }}/run" class="filters" style="margin-top:8px">
+  {% if mg.stages %}<input type="hidden" name="stages_given" value="1"><span class="muted">Promote to:</span>
+  {% for st in mg.stages %}<label><span><input type="checkbox" name="stages" value="{{ st }}" {{ 'checked' if loop.first }}> {{ st }}</span></label>{% endfor %}{% endif %}
+  <label><span><input type="checkbox" name="rescan" value="1" checked> rescan affected hosts afterwards</span></label>
+  <button name="dry_run" value="1" class="secondary">Dry run</button>
+  <button name="dry_run" value="0" onclick="return confirm('Sync, publish and promote {{ mg.name }} now?')">Run</button>
+</form></div>
+{% else %}<p class="muted">No repo managers configured.</p>{% endfor %}
+</div>
+{% endblock %}

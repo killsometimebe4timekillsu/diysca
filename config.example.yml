@@ -2,6 +2,11 @@
 # Location: native package /etc/diysca/config.yml · OCI image /config/config.yml
 #           AppImage/Flatpak/CLI ~/.config/diysca/config.yml (or ./config.yml, or $DIYSCA_CONFIG)
 
+# Database. PostgreSQL is the default for server installs:
+#   sudo -u postgres createuser -P diysca && sudo -u postgres createdb -O diysca diysca
+database_url: postgresql://diysca:change-me@localhost:5432/diysca
+# Leave empty to use a SQLite file in the data dir instead (fine for the AppImage/Flatpak on a laptop).
+
 # Ansible inventories (files or directories). Re-read before every scan.
 inventories: []
 #  - /etc/ansible/hosts              # native package / AppImage / Flatpak
@@ -16,6 +21,18 @@ ssh_user: diysca                  # an unprivileged user is enough, no sudo need
 # ssh_known_hosts: /keys/known_hosts   # or "ignore" (not recommended)
 scan_concurrency: 8
 scan_interval_hours: 12           # 0 = only scan on demand
+
+# Language packages (PyPI, npm, RubyGems, Maven jars, Packagist, crates.io, Go): installed packages and
+# lockfiles below these paths. Distro-owned dirs like /usr/lib/python3 are left to the OS package scan.
+scan_languages: true
+# lang_scan_paths: [/opt, /srv, /usr/local, /home, /root, /var/www, /var/lib/jenkins, /usr/lib/node_modules]
+
+# Container images: on each host, one running container per image is scanned as its own system
+# ("<host>/<container>"). The SSH user needs access to the runtime (rootless podman, docker group,
+# or container_sudo: true plus a NOPASSWD sudo rule for the runtime binary).
+scan_containers: true
+# container_runtimes: [podman, docker, nerdctl, crictl]
+container_sudo: false
 
 # Who downloads the package indexes of the repos configured on each host:
 #   scanner = this server (default) | host = the host itself via curl/wget over SSH
@@ -33,3 +50,38 @@ kev_enabled: true
 base_url: https://diysca.example.org   # used for links in alerts
 # web_user: admin                 # set both to enable basic auth (put a TLS reverse proxy in front!)
 # web_password: change-me
+
+# Self-hosted repositories that diysca may update when a fix is released upstream but
+# missing from your mirror (Patching > Repositories, or `diysca repo-update NAME --run`).
+# `match` = URL prefixes your hosts use for this repo's content.
+repo_managers: []
+#  - name: aptly
+#    type: aptly
+#    url: http://aptly.internal:8080          # aptly API
+#    match: [http://aptly.internal/debian]
+#    mirrors:                                 # mirror update -> snapshot ...
+#      - { name: bookworm-main, component: main }
+#      - { name: bookworm-security, component: security }
+#    publish: { prefix: debian, distribution: bookworm }   # ... -> publish switch
+#
+#  - name: pulp
+#    type: pulp
+#    url: https://pulp.internal
+#    username: admin
+#    password_env: PULP_PASSWORD               # read from this env var
+#    match: [https://pulp.internal/pulp/content/]
+#    repositories:                            # sync -> publication -> distribution
+#      - { type: rpm, name: rocky9-baseos, distribution: rocky9-baseos }
+#      - { type: deb, name: debian12-main, distribution: debian12 }
+#
+#  - name: satellite
+#    type: foreman                            # Foreman + Katello (also Red Hat Satellite / orcharhino)
+#    url: https://foreman.internal
+#    username: admin
+#    password_env: FOREMAN_PASSWORD
+#    organization: ACME
+#    match: [https://foreman.internal/pulp/content/]
+#    repositories: [Rocky 9 BaseOS x86_64, Rocky 9 AppStream x86_64]   # synced first
+#    content_view: CV-Rocky9                  # then a new version is published
+#    composite_content_view: CCV-Rocky9       # optional
+#    promote_to: [Test, Prod]                 # lifecycle stages offered in the UI

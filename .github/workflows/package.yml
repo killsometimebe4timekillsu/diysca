@@ -63,10 +63,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with: { name: native }
       - run: |
-          apt-get update -qq && apt-get install -y -qq ./diysca_*.deb
+          apt-get update -qq && apt-get install -y -qq --no-install-recommends ./diysca_*.deb
           diysca --version
           getent passwd diysca
           test -f /etc/diysca/config.yml && test -f /usr/lib/systemd/system/diysca.service
+          export DIYSCA_DATABASE_URL=   # package tests use SQLite; PostgreSQL is covered by ci.yml and the OCI job
           DIYSCA_DATA_DIR=/tmp/d diysca add-host self --local
           DIYSCA_DATA_DIR=/tmp/d DIYSCA_REPO_FETCH=off DIYSCA_NVD_ENABLED=0 DIYSCA_KEV_ENABLED=0 DIYSCA_OSV_MODE=bulk diysca scan --no-alerts
 
@@ -76,17 +77,29 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: ["rockylinux:9", "almalinux:8"]
+        include:
+          - { image: "docker.io/library/almalinux:8", install: "dnf install -y ./diysca-*.rpm" }
+          - { image: "docker.io/library/rockylinux:9", install: "dnf install -y ./diysca-*.rpm" }
+          - { image: "registry.access.redhat.com/ubi10/ubi:latest", install: "dnf install -y ./diysca-*.rpm" }
+          - { image: "registry.suse.com/bci/bci-base:16.0", install: "zypper --non-interactive install --allow-unsigned-rpm ./diysca-*.rpm" }
     container: ${{ matrix.image }}
     steps:
       - uses: actions/download-artifact@v4
         with: { name: native }
-      - run: |
-          dnf install -y ./diysca-*.rpm
+      - name: install and smoke test
+        run: |
+          cat /etc/os-release | head -3
+          ${{ matrix.install }}
           diysca --version
           getent passwd diysca
+          test -f /etc/diysca/config.yml && test -f /usr/lib/systemd/system/diysca.service
+          export DIYSCA_DATABASE_URL=   # package tests use SQLite; PostgreSQL is covered by ci.yml and the OCI job
           DIYSCA_DATA_DIR=/tmp/d diysca add-host self --local
-          DIYSCA_DATA_DIR=/tmp/d DIYSCA_REPO_FETCH=off DIYSCA_NVD_ENABLED=0 DIYSCA_KEV_ENABLED=0 DIYSCA_OSV_MODE=bulk diysca scan --no-alerts
+          DIYSCA_DATA_DIR=/tmp/d DIYSCA_REPO_FETCH=scanner DIYSCA_NVD_ENABLED=0 DIYSCA_KEV_ENABLED=0 DIYSCA_OSV_MODE=bulk diysca scan --no-alerts | tee /tmp/scan.json
+          DIYSCA_DATA_DIR=/tmp/d diysca hosts
+          # the scan itself must succeed (feed coverage for a brand-new release may still be partial)
+          ! grep -q '"error": "no package manager' /tmp/scan.json
+          DIYSCA_DATA_DIR=/tmp/d diysca sbom self | head -c 400
 
   flatpak:
     runs-on: ubuntu-latest
@@ -107,10 +120,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: build (buildah)
         run: buildah bud --format oci -t diysca:ci -f Containerfile .
-      - name: smoke test (podman)
+      - name: smoke test (podman + PostgreSQL)
         run: |
           # host networking: the smoke test is about the image, not the runner's rootless port forwarding
-          podman run -d --name diysca --network host diysca:ci
+          podman run -d --name pg --network host -e POSTGRES_USER=diysca -e POSTGRES_PASSWORD=diysca docker.io/library/postgres:17
+          for i in $(seq 1 30); do podman exec pg pg_isready -U diysca && break; sleep 1; done
+          podman run -d --name diysca --network host \
+            -e DIYSCA_DATABASE_URL=postgresql://diysca:diysca@127.0.0.1:5432/diysca diysca:ci
           ok=
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/healthz && { ok=1; break; }; sleep 1; done
           podman ps -a
@@ -118,7 +134,8 @@ jobs:
           test -n "$ok"
           curl -fsS http://127.0.0.1:8080/findings >/dev/null
           podman exec diysca diysca --version
-          podman rm -f diysca
+          podman exec pg psql -U diysca -c '\dt' | grep findings
+          podman rm -f diysca pg
       - name: push to ghcr.io
         if: github.event_name == 'push'
         run: |

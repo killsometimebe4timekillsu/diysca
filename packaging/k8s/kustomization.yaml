@@ -5,6 +5,7 @@ namespace: diysca
 resources:
   - namespace.yaml
   - pvc.yaml
+  - postgres.yaml
   - deployment.yaml
   - service.yaml
 configMapGenerator:
@@ -15,6 +16,10 @@ configMapGenerator:
     files:
       - hosts.ini
 secretGenerator:
+  - name: diysca-db
+    files:
+      - password=secrets/db-password
+      - url=secrets/database-url     # postgresql://diysca:<password>@diysca-db:5432/diysca
   - name: diysca-ssh
     files:
       - id_ed25519=secrets/id_ed25519

@@ -4,7 +4,7 @@ metadata:
   name: diysca
   labels: { app: diysca }
 spec:
-  replicas: 1                 # SQLite: exactly one writer
+  replicas: 1                 # one scheduler instance
   strategy: { type: Recreate }
   selector:
     matchLabels: { app: diysca }
@@ -23,12 +23,14 @@ spec:
           ports: [{ containerPort: 8080, name: http }]
           env:
             - { name: DIYSCA_CONFIG, value: /config/config.yml }
+            - name: DIYSCA_DATABASE_URL
+              valueFrom: { secretKeyRef: { name: diysca-db, key: url } }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
           volumeMounts:
-            - { name: data, mountPath: /data }
+            - { name: data, mountPath: /data }   # OSV bulk mirror cache
             - { name: config, mountPath: /config, readOnly: true }
             - { name: inventory, mountPath: /inventories, readOnly: true }
             - { name: ssh, mountPath: /keys, readOnly: true }

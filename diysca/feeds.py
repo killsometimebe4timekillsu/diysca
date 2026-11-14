@@ -136,10 +136,14 @@ def osv_ecosystem(os_id: str, version: str, pretty: str = "") -> str | None:
         return f"AlmaLinux:{major}"
     if os_id in ("opensuse-leap",) and version:
         return f"openSUSE:Leap {version}"
-    if os_id in ("sles", "sled") and version:
+    if os_id in ("sles", "sled", "sles_sap") and version:
         v = version.split(".")
+        if int(v[0]) >= 16:  # SLE 16+: "SUSE:Linux Enterprise Server 16.0"
+            return f"SUSE:Linux Enterprise Server {v[0]}.{v[1] if len(v) > 1 else 0}"
         return f"SUSE:Linux Enterprise Server {v[0]}" + (f" SP{v[1]}" if len(v) > 1 and v[1] != "0" else "")
     if os_id in ("rhel", "centos") and major:
+        if int(major) >= 10:  # RHEL 10 advisories are per minor release: "Red Hat:enterprise_linux:10.1"
+            return f"Red Hat:enterprise_linux:{version if '.' in version else major}"
         return f"Red Hat:enterprise_linux:{major}::baseos"
     if os_id == "mageia" and major:
         return f"Mageia:{major}"
@@ -283,7 +287,9 @@ async def nvd_enrich(limit: int = 200) -> int:
                                 score, vector = d.get("baseScore"), d.get("vectorString")
                                 sev = d.get("baseSeverity") or metrics[key][0].get("baseSeverity") or score_to_sev(score)
                                 break
-                    db.x("INSERT OR REPLACE INTO nvd_cache VALUES (?,?,?,?,?,?)",
+                    db.x("""INSERT INTO nvd_cache VALUES (?,?,?,?,?,?) ON CONFLICT(cve) DO UPDATE SET score=excluded.score,
+                            severity=excluded.severity, vector=excluded.vector, description=excluded.description,
+                            fetched_at=excluded.fetched_at""",
                          (cve, score, norm_sev(sev) if sev else "UNKNOWN", vector, desc, db.now()))
                     n += 1
                 elif resp.status_code in (403, 429):
@@ -323,7 +329,7 @@ async def refresh_kev(force=False) -> int:
         return 0
     with db.tx() as c:
         c.execute("DELETE FROM kev")
-        c.executemany("INSERT OR REPLACE INTO kev VALUES (?,?,?,?,?)",
+        c.executemany("INSERT INTO kev VALUES (?,?,?,?,?) ON CONFLICT(cve) DO NOTHING",
                       [(i["cveID"], i.get("vulnerabilityName"), i.get("dateAdded"), i.get("dueDate"),
                         i.get("knownRansomwareCampaignUse")) for i in items])
     _kev_loaded = time.time()
@@ -331,7 +337,27 @@ async def refresh_kev(force=False) -> int:
 
 
 # ------------------------------------------------------- OSV bulk mirror
+LANG_ECOSYSTEMS = {"PyPI", "npm", "RubyGems", "Maven", "Packagist", "crates.io", "Go"}
+
+
+def rh_prefix(eco: str) -> str:
+    """Red Hat:enterprise_linux:10.1 / Red Hat:enterprise_linux:9::baseos -> Red Hat:enterprise_linux:<major>"""
+    parts = eco.split(":")
+    return ":".join(parts[:2] + [parts[2].split(".")[0]]) if len(parts) >= 3 else eco
+
+
+def eco_matches(aff_eco: str, eco: str) -> bool:
+    if aff_eco == eco:
+        return True
+    if eco.startswith("Red Hat:"):
+        p = rh_prefix(eco)
+        return aff_eco == p or (aff_eco.startswith(p) and aff_eco[len(p)] in ":.")
+    return False
+
+
 def eco_pkg_type(eco: str) -> str:
+    if eco in LANG_ECOSYSTEMS:
+        return eco
     if eco.startswith(("Debian", "Ubuntu")):
         return "deb"
     if eco.startswith("Alpine"):
@@ -361,6 +387,8 @@ class BulkOSVClient:
     air-gapped scanners: point osv_bulk_url at your own mirror of it.
     """
 
+    local_match = True  # versions are matched here, not by the OSV server
+
     def __init__(self, base: str | None = None):
         self.base = (base or settings.osv_bulk_url).rstrip("/")
         self.client = httpx.AsyncClient(timeout=600, follow_redirects=True, verify=settings.http_proxy_ca or True)
@@ -383,9 +411,18 @@ class BulkOSVClient:
             d.mkdir(parents=True, exist_ok=True)
             zpath = d / (eco.replace(":", "_").replace(" ", "_") + ".zip")
             headers = {"If-None-Match": meta["etag"]} if meta and meta["etag"] and zpath.exists() else {}
+            # per-release zip (e.g. "Debian:12") when the bucket has one, else the whole ecosystem ("Red Hat", "SUSE")
+            base_eco = eco.split(":")[0]
             url = f"{self.base}/{quote(eco)}/all.zip"
+            if not self.base.startswith("file://") and eco != base_eco:
+                head = await self.client.head(url)
+                if head.status_code == 404:
+                    url = f"{self.base}/{quote(base_eco)}/all.zip"
             if self.base.startswith("file://"):
-                src = Path(self.base[7:]) / eco / "all.zip"
+                root = Path(self.base[7:])
+                src = root / eco / "all.zip"
+                if not src.exists():
+                    src = root / base_eco / "all.zip"
                 zpath.write_bytes(src.read_bytes())
                 etag = None
             else:
@@ -402,7 +439,8 @@ class BulkOSVClient:
                     tmp.replace(zpath)
                     etag = r.headers.get("etag")
             n = await asyncio.to_thread(self._load_zip, eco, zpath)
-            db.x("INSERT OR REPLACE INTO osv_bulk_meta VALUES (?,?,?,?)", (eco, db.now(), etag, n))
+            db.x("""INSERT INTO osv_bulk_meta VALUES (?,?,?,?) ON CONFLICT(ecosystem) DO UPDATE SET
+                    fetched_at=excluded.fetched_at, etag=excluded.etag, count=excluded.count""", (eco, db.now(), etag, n))
             db.event("feed", f"OSV bulk {eco}: {n} package advisories loaded")
             return n
 
@@ -421,14 +459,17 @@ class BulkOSVClient:
                 by_pkg: dict[str, list] = {}
                 for a in v.get("affected") or []:
                     pk = a.get("package") or {}
-                    if pk.get("ecosystem") == eco or (eco.startswith("Red Hat") and pk.get("ecosystem", "").startswith(eco.rsplit(":", 2)[0])):
-                        by_pkg.setdefault(pk.get("name"), []).append(a)
+                    if eco_matches(pk.get("ecosystem", ""), eco):
+                        name = pk.get("name") or ""
+                        if eco == "PyPI":
+                            name = re.sub(r"[-_.]+", "-", name).lower()
+                        by_pkg.setdefault(name, []).append(a)
                 for name, affs in by_pkg.items():
                     if name:
                         rows.append((eco, name, v["id"], json.dumps(_trim(v, affs))))
         with db.tx() as c:
             c.execute("DELETE FROM osv_bulk WHERE ecosystem=?", (eco,))
-            c.executemany("INSERT OR REPLACE INTO osv_bulk VALUES (?,?,?,?)", rows)
+            c.executemany("INSERT INTO osv_bulk VALUES (?,?,?,?) ON CONFLICT(ecosystem, package, id) DO NOTHING", rows)
         return len(rows)
 
     async def query_ids(self, queries: list[dict]) -> list[list[str]]:

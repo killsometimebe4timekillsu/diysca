@@ -1,12 +1,34 @@
 # Compose spec: works with "podman compose", "nerdctl compose", "docker compose", ...
 services:
+  db:
+    image: docker.io/library/postgres:17
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: diysca
+      POSTGRES_PASSWORD: ${DIYSCA_DB_PASSWORD:-change-me}
+      POSTGRES_DB: diysca
+    volumes:
+      - db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "diysca"]
+      interval: 5s
+      retries: 20
+
   diysca:
     image: ghcr.io/killsometimebe4timekillsu/diysca:latest
     build: { context: ., dockerfile: Containerfile }
     restart: unless-stopped
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      DIYSCA_DATABASE_URL: postgresql://diysca:${DIYSCA_DB_PASSWORD:-change-me}@db:5432/diysca
     ports: ["8080:8080"]
     volumes:
-      - ./data:/data                      # SQLite DB + OSV mirror (must be writable by uid 10001)
+      - data:/data                        # OSV bulk mirror cache
       - ./config.yml:/config/config.yml:ro
       - ./inventories:/inventories:ro     # your Ansible inventories
       - ./keys:/keys:ro                   # id_ed25519 + known_hosts
+
+volumes:
+  db:
+  data:

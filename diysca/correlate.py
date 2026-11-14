@@ -4,7 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .collectors import HostFacts, Package
-from .feeds import OSVClient, fetch_vulns, sev_rank, vuln_cves, vuln_severity
+from .langpkgs import LangPackage
+from .feeds import OSVClient, eco_matches, fetch_vulns, sev_rank, vuln_cves, vuln_severity
 from .versions import compare, max_version
 
 
@@ -21,14 +22,8 @@ class Candidate:
     severity: str = "UNKNOWN"
     cvss_score: float | None = None
     summary: str = ""
-
-
-def eco_matches(aff_eco: str, eco: str) -> bool:
-    if aff_eco == eco:
-        return True
-    if eco.startswith("Red Hat:"):
-        return aff_eco.startswith(":".join(eco.split(":")[:3]))
-    return False
+    ecosystem: str = ""     # '' = OS package, else PyPI, npm, Maven, ...
+    location: str = ""      # language packages: where they were found
 
 
 def evaluate(affected: dict, version: str, pkg_type: str) -> tuple[bool, str | None]:
@@ -38,7 +33,7 @@ def evaluate(affected: dict, version: str, pkg_type: str) -> tuple[bool, str | N
     else:
         hit, fixed = False, None
     for rng in affected.get("ranges") or []:
-        if rng.get("type") not in ("ECOSYSTEM", None):
+        if rng.get("type") not in ("ECOSYSTEM", "SEMVER", None):
             continue
         events = rng.get("events") or []
         intros = [e["introduced"] for e in events if "introduced" in e]
@@ -131,3 +126,53 @@ async def correlate(facts: HostFacts, ecosystem: str, client: OSVClient,
                 c.repo_version = repo_v
                 c.fix_in_repo = bool(repo_v and c.fixed_version and compare(pkg_type, repo_v, c.fixed_version) >= 0)
     return list(out.values())
+
+
+async def correlate_lang(pkgs: list[LangPackage], client) -> list[Candidate]:
+    """Language packages: same feed, per-ecosystem version semantics, no repo awareness."""
+    if not pkgs:
+        return []
+    queries = [{"package": {"name": p.name, "ecosystem": p.ecosystem}, "version": p.version} for p in pkgs]
+    id_lists = await client.query_ids(queries)
+    vulns = await fetch_vulns(client, {i for ids in id_lists for i in ids})
+    trust_server = not getattr(client, "local_match", False)
+    out: dict[tuple[str, str, str], Candidate] = {}
+    for p, ids in zip(pkgs, id_lists):
+        for vid in ids:
+            v = vulns.get(vid)
+            if not v or v.get("withdrawn"):
+                continue
+            entries = [a for a in v.get("affected") or []
+                       if a.get("package", {}).get("ecosystem") == p.ecosystem
+                       and _same_name(p.ecosystem, a.get("package", {}).get("name", ""), p.name)]
+            fixed = None
+            if entries:
+                hits = [evaluate(a, p.version, p.ecosystem) for a in entries]
+                if not any(h for h, _ in hits) and not trust_server:
+                    continue
+                fixes = [f for h, f in hits if f]
+                fixed = max_version(p.ecosystem, fixes) if fixes else None
+            score, sev, _ = vuln_severity(v)
+            for cve in vuln_cves(v) or [v["id"]]:
+                key = (p.ecosystem, p.name, cve)
+                c = out.get(key)
+                if c is None:
+                    c = out[key] = Candidate(p.name, p.version, [], cve, summary=v.get("summary") or "",
+                                             ecosystem=p.ecosystem, location=", ".join(p.locations[:3]))
+                if v["id"] not in c.osv_ids:
+                    c.osv_ids.append(v["id"])
+                if fixed and (c.fixed_version is None or compare(p.ecosystem, fixed, c.fixed_version) > 0):
+                    c.fixed_version = fixed
+                if sev_rank(sev) > sev_rank(c.severity):
+                    c.severity = sev
+                if score is not None and (c.cvss_score is None or score > c.cvss_score):
+                    c.cvss_score = score
+    return list(out.values())
+
+
+def _same_name(eco: str, a: str, b: str) -> bool:
+    if eco == "PyPI":
+        import re
+        n = lambda s: re.sub(r"[-_.]+", "-", s).lower()  # noqa: E731
+        return n(a) == n(b)
+    return a == b

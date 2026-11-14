@@ -9,6 +9,8 @@
   <label>System<input name="host" value="{{ args.host or '' }}"></label>
   <label>Group<select name="group"><option value="">any</option>{% for g in groups %}<option {{ 'selected' if args.group==g }}>{{ g }}</option>{% endfor %}</select></label>
   <label>OS<input name="os" value="{{ args.os or '' }}"></label>
+  <label>Type<select name="eco"><option value="">all</option><option value="os" {{ 'selected' if args.eco=='os' }}>OS packages</option><option value="lang" {{ 'selected' if args.eco=='lang' }}>language packages</option>
+    {% for e in ['PyPI','npm','Maven','RubyGems','Go','crates.io','Packagist'] %}<option {{ 'selected' if args.eco==e }}>{{ e }}</option>{% endfor %}</select></label>
   <label><span><input type="checkbox" name="vulnerable" value="1" {{ 'checked' if args.vulnerable }}> only vulnerable</span></label>
   <label><span><input type="checkbox" name="upgradable" value="1" {{ 'checked' if args.upgradable }}> newer in repo</span></label>
   <button>Filter</button> <a href="/packages">reset</a>
@@ -16,9 +18,9 @@
 {{ m.saved_bar(page, query_string, saved_filters) }}
 </div>
 <div class="card"><p class="muted">{{ rows|length }} rows{{ ' (limited to 5000)' if rows|length >= 5000 }}</p>
-<table><tr><th>Package</th><th>Version</th><th>System</th><th>Arch</th><th>Source pkg</th><th>Repo candidate</th><th>Vulns</th></tr>
-{% for p in rows %}<tr><td>{{ p.name }}</td><td class="mono">{{ p.version }}</td><td><a href="/systems/{{ p.host_id }}">{{ p.host_name }}</a></td>
-<td>{{ p.arch }}</td><td>{{ p.source_name if p.source_name != p.name }}</td><td class="mono">{{ p.repo_version if p.repo_version and p.repo_version != p.version }}</td>
+<table><tr><th>Package</th><th>Version</th><th>System</th><th>Arch / where</th><th>Source pkg</th><th>Repo candidate</th><th>Vulns</th></tr>
+{% for p in rows %}<tr><td>{% if p.ecosystem %}<span class="tag">{{ p.ecosystem }}</span> {% endif %}{{ p.name }}</td><td class="mono">{{ p.version }}</td><td><a href="/systems/{{ p.host_id }}">{{ p.host_name }}</a></td>
+<td>{{ p.arch }}<small class="muted">{{ p.location or '' }}</small></td><td>{{ p.source_name if p.source_name != p.name }}</td><td class="mono">{{ p.repo_version if p.repo_version and p.repo_version != p.version }}</td>
 <td>{% if p.vuln_count %}<a class="bad" href="/findings?host={{ p.host_name }}&package={{ p.source_name or p.name }}">{{ p.vuln_count }}</a>{% endif %}</td></tr>{% endfor %}
 </table></div>
 {% endblock %}

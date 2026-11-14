@@ -12,6 +12,9 @@ install -d -m 0700 -o diysca -g diysca /var/lib/diysca/.ssh 2>/dev/null || true
 chgrp diysca /etc/diysca/config.yml 2>/dev/null && chmod 0640 /etc/diysca/config.yml || true
 if [ -d /run/systemd/system ]; then
   systemctl daemon-reload || true
-  echo "diysca installed. Edit /etc/diysca/config.yml, put the SSH key in /var/lib/diysca/.ssh/, then:"
+  echo "diysca installed. Next steps:"
+  echo "  1. PostgreSQL: sudo -u postgres createuser -P diysca && sudo -u postgres createdb -O diysca diysca"
+  echo "  2. Edit /etc/diysca/config.yml (database_url, inventories), put the SSH key in /var/lib/diysca/.ssh/"
+  echo "  3. Start:"
   echo "  systemctl enable --now diysca"
 fi

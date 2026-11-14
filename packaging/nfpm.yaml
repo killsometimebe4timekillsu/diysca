@@ -17,6 +17,8 @@ description: |
 vendor: diysca
 homepage: https://github.com/killsometimebe4timekillsu/diysca
 license: MIT
+recommends:
+  - postgresql
 contents:
   - src: dist/diysca
     dst: /opt/diysca

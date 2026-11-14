@@ -5,11 +5,17 @@ diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent
 * **Public CVE sources:** [OSV.dev](https://osv.dev) is the main source. It aggregates the Debian, Ubuntu, Alpine, AlmaLinux, Rocky, SUSE and Red Hat security trackers, with exact fixed versions per distro release. **NVD** adds CVSS scores and descriptions, and **CISA KEV** flags known exploited CVEs.
 * **Local systems:** hosts are scanned agentless over SSH (or locally) for installed `dpkg`, `rpm` and `apk` packages. No root is needed.
 * **Repos:** each host's configured repositories are read (`sources.list`, deb822 `.sources`, `yum.repos.d`, `/etc/apk/repositories`), and their package indexes are downloaded. This includes local mirrors, Aptly, Pulp and Nexus. diysca can then tell you whether the fix is actually installable from *your* repos.
-* **Correlation:** installed version × distro advisory ranges × repo candidate version. The comparison uses real dpkg, rpm and apk version semantics.
+* **Language packages:** PyPI, npm, RubyGems, Maven (from the `pom.properties` inside jars), Packagist, crates.io and Go are covered. diysca reads installed packages (`*.dist-info`, `node_modules`, gemspecs, jars) and lockfiles (`package-lock.json`, `yarn.lock`, `Gemfile.lock`, `poetry.lock`, `Pipfile.lock`, `requirements*.txt`, `composer.lock`, `Cargo.lock`, `go.mod`).
+* **Container images:** on each host, the images of running containers are scanned (podman, docker, nerdctl and crictl). Each image appears as its own system, `<host>/<container>`, and gets its own OS packages, language packages and SBOM.
+* **Correlation:** installed version × distro advisory ranges × repo candidate version. The comparison uses real dpkg, rpm and apk version semantics, plus per-ecosystem rules for language packages.
+* **Patching:**
+  * diysca generates an **Ansible playbook** for the selected findings. It pins every affected package to the exact version your repos offer, and includes an optional reboot.
+  * If a fix is released upstream but your mirror doesn't have it yet, diysca can update the **self-hosted repo**: aptly (mirror update → snapshot → publish switch), Pulp 3 (sync → publication → distribution) or Foreman/Katello (sync → publish the content view → promote it to your lifecycle stages). It does a dry run first.
 * **SBOM:** one CycloneDX 1.5 JSON file per system, including a `vulnerabilities` section.
 * **Alerts:** sent via [Apprise](https://github.com/caronc/apprise/wiki), which covers ntfy, Gotify, e-mail, Telegram, Slack, Matrix, Discord, Teams, webhooks and more. Subscriptions decide *which packages on which systems at which severity* go to *which channel*. Each finding is sent only once.
 * **Ansible inventories:** INI and YAML, groups, `:children`, `:vars`, `group_vars/`, `host_vars/` and host ranges. If `ansible-inventory` is installed, it is used instead, so dynamic and vaulted inventories also work.
-* **Web UI:** dashboard, systems, packages and findings, with filters by system, group, OS, package, CVE, severity, fix availability and KEV. Filters can be saved, and you can manage channels and subscriptions from the UI.
+* **Web UI:** dashboard, systems, packages, findings and patching pages. Findings can be filtered by system, group, OS, host or container, package, ecosystem, CVE, severity, fix availability and KEV. Filters can be saved, and you can manage channels and subscriptions from the UI.
+* **Database:** PostgreSQL. SQLite remains available for single-user desktop installs, i.e. the AppImage and Flatpak.
 
 ![dashboard](docs/dash.png)
 
@@ -53,7 +59,7 @@ podman run -d --name diysca -p 8080:8080 \
 
 * **systemd-managed Podman:** use the Quadlet in [`packaging/quadlet/diysca.container`](packaging/quadlet/diysca.container).
 * **Compose-spec tools** (`podman compose`, `nerdctl compose`, …): use [`compose.yaml`](compose.yaml).
-* **Kubernetes:** run `kubectl apply -k packaging/k8s` with the manifests in [`packaging/k8s/`](packaging/k8s). They use a non-root, read-only root filesystem, a PVC, and a ConfigMap and Secret for the config and SSH key.
+* **Kubernetes:** run `kubectl apply -k packaging/k8s` with the manifests in [`packaging/k8s/`](packaging/k8s). They include PostgreSQL, run non-root with a read-only root filesystem, and use a ConfigMap and Secrets for the config, the SSH key and the database.
 * **Building the image yourself:** `podman build -f Containerfile -t diysca .` works, as does `buildah bud`, or any other OCI builder.
 
 ### AppImage
@@ -80,6 +86,18 @@ The Flatpak sandbox can use the network and your ssh-agent, and has read-only ac
 2. Run `diysca import /path/to/inventory`, or set `inventories:` in the config.
 3. Click **Scan all** in the UI, or run `diysca scan`.
 
+### PostgreSQL
+
+Server installs use PostgreSQL. Set `database_url` in the config, or the `DIYSCA_DATABASE_URL` environment variable. The schema is created automatically on start.
+
+* **Native package:** `sudo -u postgres createuser -P diysca && sudo -u postgres createdb -O diysca diysca`.
+* **compose.yaml, the Quadlet and the Kubernetes manifests:** each ships a PostgreSQL 17 container. You can also point them at an existing cluster.
+
+### Patching
+
+1. Open **Patching**. You can also select findings on **Findings**, or click **Patch playbook** on a system. Then download the playbook and run it with `ansible-playbook -i <inventory> diysca-patch.yml --check --diff`, followed by a real run.
+2. For fixes that aren't in your repos yet, configure `repo_managers` (see `config.example.yml`). Use **Dry run** and then **Run** on the Patching page, or `diysca repo-update <name> [--run] [--stage Test]`. The affected hosts are rescanned afterwards, so their findings move to "fix available in your repos".
+
 ### CLI
 
 ```bash
@@ -91,6 +109,9 @@ diysca sbom system_a > system_a.cdx.json
 diysca channel ntfy ntfy://ntfy.sh/my-secret-topic
 diysca subscribe "postgres prod" --channel ntfy --hosts 'group:prod' --packages 'postgresql*,libpq*' --min-severity HIGH
 diysca notify --dry-run
+diysca playbook --filter 'fix=repo&severity=HIGH' -o patch.yml
+diysca repo-update                      # list repo managers and what they would fix
+diysca repo-update satellite --stage Test --run
 diysca serve                            # UI + scheduler on :8080
 ```
 
@@ -120,7 +141,7 @@ Config is looked up in this order: `$DIYSCA_CONFIG`, then `./config.yml`, then `
       OSV (api or bulk mirror) ──► correlate ◄─┘──► findings ──► Apprise channels
       NVD (CVSS) + CISA KEV ────►      │                           (subscriptions)
                                        ▼
-                                 SQLite ──► Web UI / JSON API / CycloneDX SBOM
+                             PostgreSQL ──► Web UI / JSON API / CycloneDX SBOM / patch playbooks
 ```
 
 * Advisories are matched on the **source package** (that is how Debian, Ubuntu and Alpine publish them). A finding lists every installed binary built from it, for example `postgresql-16` → `libpq5, postgresql-16`.
@@ -135,7 +156,7 @@ Config is looked up in this order: `$DIYSCA_CONFIG`, then `./config.yml`, then `
 | `api` (default) | `api.osv.dev/v1/querybatch` per scan | normal internet access |
 | `bulk` | downloads `<Ecosystem>/all.zip` (e.g. `Debian:12`, ~50–150 MB) every `osv_bulk_hours` and matches locally | lots of hosts, flaky or limited egress, air-gapped (point `osv_bulk_url` at a `file://` mirror) |
 
-Supported distros: Debian, Ubuntu, Alpine, Rocky, AlmaLinux, openSUSE Leap/SLES, and RHEL (best effort). Fedora and Arch are not covered by OSV.
+Supported distros: Debian, Ubuntu, Alpine, Rocky, AlmaLinux, RHEL (including 10), SLES (including 16) and openSUSE Leap. Fedora and Arch are not covered by OSV. CI install-tests the native packages on Debian 12, Ubuntu 22.04/24.04, AlmaLinux 8, Rocky 9, RHEL 10 (UBI 10) and SLES 16 (BCI 16).
 
 ## API
 
@@ -145,5 +166,6 @@ Supported distros: Debian, Ubuntu, Alpine, Rocky, AlmaLinux, openSUSE Leap/SLES,
 
 * yum/dnf repos that only use `mirrorlist` or `metalink` are not indexed (set `baseurl`).
 * NVD without an API key is slow (about 5 CVEs per 30 s). Get a free key.
-* Language packages (pip, npm, gems, jars) and container images are not scanned yet. OSV supports them, so this is a natural next step.
-* **Patching** (the "patchor" half): generate an Ansible playbook that upgrades the selected findings to the repo candidate version.
+* Images without `/bin/sh` (distroless, scratch) can't be scanned through `exec`.
+* Language packages are reported with a fix version and their location. Upgrading them is left to the application's own build, and the playbook lists them as manual items.
+* Fat jars that nest other jars are only read one level deep.

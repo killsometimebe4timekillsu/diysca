@@ -72,6 +72,13 @@ class SSHTransport(Transport):
 
 
 def transport_for(host_row) -> Transport:
+    if host_row["kind"] == "container":
+        from . import db
+        from .containers import ContainerTransport
+        parent = db.q1("SELECT * FROM hosts WHERE id=?", (host_row["parent_id"],))
+        if parent is None:
+            raise RuntimeError("parent host of this container no longer exists")
+        return ContainerTransport(transport_for(parent), host_row["container_runtime"], host_row["container_id"])
     if host_row["connection"] == "local":
         return LocalTransport()
     return SSHTransport(host_row["address"], host_row["port"] or 22, host_row["ssh_user"], host_row["key_file"])
