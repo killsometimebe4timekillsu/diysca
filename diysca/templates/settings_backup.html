@@ -1,0 +1,33 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+{{ m.settings_tabs(tab) }}
+{% if result %}
+<div class="notice {{ 'bad' if result.errors }}">
+{% if result.errors %}<b>Nothing was imported.</b> Fix these and try again:<ul>{% for e in result.errors %}<li>{{ e }}</li>{% endfor %}</ul>
+{% elif result.dry_run %}<b>Preview:</b> {{ result.added }} would be added, {{ result.updated }} updated, {{ result.removed }} removed. Untick "Preview only" to import.
+{% else %}<b>Imported:</b> {{ result.added }} added, {{ result.updated }} updated, {{ result.removed }} removed.{% endif %}
+{% if result.skipped %}<br>Skipped: {{ result.skipped|join('; ') }}{% endif %}
+</div>{% endif %}
+<div class="row">
+<div class="card"><h2>Export</h2>
+<p class="muted">One YAML file with the settings kept in the database. Sources from config.yml are left out because the file already has them.</p>
+<form method="get" action="/settings/export.yml" class="filters" style="flex-direction:column;align-items:flex-start" onsubmit="this.parts.value=[...this.querySelectorAll('[data-part]:checked')].map(c=>c.value).join(',')">
+  <input type="hidden" name="parts">
+  {% for p in parts %}<label><span><input type="checkbox" data-part value="{{ p }}" checked> {{ p|replace('_',' ') }}</span></label>{% endfor %}
+  <label><span><input type="checkbox" name="secrets" value="1"> include secrets (channel URLs, source headers)</span></label>
+  <button>Download diysca-settings.yml</button>
+</form>
+<p class="muted small">Same from the command line: <span class="mono">diysca settings export [--secrets] &gt; diysca-settings.yml</span></p>
+</div>
+<div class="card"><h2>Import</h2>
+<p class="muted">Upload or paste an export, or a plain list of sources in config.yml format. Items are matched by name. Masked secrets (***) keep the stored value.</p>
+<form method="post" action="/settings/import" enctype="multipart/form-data" class="filters" style="flex-direction:column;align-items:stretch">
+  <label>File<input type="file" name="file" accept=".yml,.yaml,.json"></label>
+  <label>…or paste YAML / JSON<textarea name="text" rows="10" placeholder="sources:&#10;  - name: alpine-community&#10;    type: alpine-secdb&#10;    url: https://secdb.alpinelinux.org/v3.20/community.json">{{ text or '' }}</textarea></label>
+  <label><span><input type="checkbox" name="dry_run" value="1" checked> Preview only</span></label>
+  <label><span><input type="checkbox" name="replace" value="1"> Replace: remove items of the imported kinds that are not in the file</span></label>
+  <div><button>Import</button></div>
+</form></div>
+</div>
+{% endblock %}

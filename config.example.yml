@@ -46,6 +46,42 @@ nvd_enabled: true
 nvd_api_key: ""                   # free key from nvd.nist.gov makes enrichment ~10x faster
 kev_enabled: true
 
+# Extra CVE sources, on top of OSV / NVD / KEV. Each is downloaded every `refresh_hours`,
+# converted to OSV records and matched like OSV data. You can also add sources in the web UI
+# (CVE sources page); the ones defined here can only be changed here.
+sources: []
+#  - name: debian-tracker              # CVEs Debian hasn't fixed yet, with Debian's urgency
+#    type: debian-tracker
+#    releases: [bookworm, trixie]      # default: the releases your hosts run
+#  - name: alpine-main
+#    type: alpine-secdb
+#    url: https://secdb.alpinelinux.org/v3.20/main.json
+#  - name: epss                        # exploit probability per CVE (enrichment only)
+#    type: epss
+#  - name: ghsa                        # any OSV-format feed: zip, JSON list, NDJSON or a directory
+#    type: osv
+#    path: /srv/mirror/advisory-database/advisories/github-reviewed
+#    ecosystems: [npm, PyPI, Maven]
+#  - name: acme                        # your own feed, mapped field by field
+#    type: custom
+#    url: https://intranet.example/advisories.json
+#    headers: {Authorization: "Bearer CHANGE-ME"}
+#    format: json                      # json | yaml | csv
+#    records: data.advisories          # where the list of records is
+#    refresh_hours: 6
+#    fields:
+#      id: advisory_id
+#      aliases: cves
+#      package: product.name
+#      ecosystem: product.ecosystem    # e.g. Debian:12, Red Hat:enterprise_linux:10, PyPI, npm
+#      introduced: since
+#      fixed: fixed_in                 # or versions: [...] / last_affected
+#      severity: severity
+#      cvss: score                     # number or CVSS:3.x vector
+#      summary: title
+#    defaults:
+#      ecosystem: "Debian:12"
+
 # Web UI
 base_url: https://diysca.example.org   # used for links in alerts
 # web_user: admin                 # set both to enable basic auth (put a TLS reverse proxy in front!)

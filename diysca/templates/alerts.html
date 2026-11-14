@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% import "macros.html" as m %}
-{% block title %}Alerts{% endblock %}
+{% block title %}Settings{% endblock %}
 {% block content %}
-<h1>Alerts</h1>
+{{ m.settings_tabs(tab) }}
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
 <div class="row">
 <div class="card"><h2>Channels</h2>
@@ -34,7 +34,7 @@
   <label><span><input type="checkbox" name="only_fixable" value="1"> only if fix is in my repos</span></label>
   <button>Add subscription</button></form>
 {% endif %}
-<form method="post" action="/alerts/dispatch" style="margin-top:10px"><button class="secondary">Send pending alerts now</button></form>
+<form method="post" action="/settings/notifications/dispatch" style="margin-top:10px"><button class="secondary">Send pending alerts now</button></form>
 </div></div>
 <div class="card"><h2>Recently sent</h2><table><tr><th>When</th><th>Channel</th><th>System</th><th>Package</th><th>CVE</th><th>Result</th></tr>
 {% for l in log %}<tr><td class="mono">{{ l.sent_at }}</td><td>{{ l.channel }}</td><td>{{ l.host }}</td><td>{{ l.package }}</td><td>{{ l.vuln_id }}</td><td class="{{ 'ok' if l.ok else 'bad' }}">{{ 'ok' if l.ok else l.error }}</td></tr>{% endfor %}</table></div>

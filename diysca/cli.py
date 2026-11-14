@@ -78,6 +78,29 @@ def main(argv=None):
     s = sp.add_parser("notify", help="send pending alerts")
     s.add_argument("--dry-run", action="store_true")
 
+    s = sp.add_parser("reprovision", help="Ansible playbook that rebuilds a system from its SBOM")
+    s.add_argument("host", nargs="?", help="system name (or use --sbom)")
+    s.add_argument("--sbom", help="CycloneDX JSON file instead of a scanned system")
+    s.add_argument("--mode", choices=["fixed", "exact"], default="fixed")
+    s.add_argument("--target", help="inventory host or group to run against (default: the system name)")
+    s.add_argument("-o", "--output")
+
+    s = sp.add_parser("settings", help="export or import settings (sources, channels, subscriptions, saved filters)")
+    s.add_argument("action", choices=["export", "import"])
+    s.add_argument("file", nargs="?", help="import: YAML/JSON file (default stdin)")
+    s.add_argument("--secrets", action="store_true", help="export: include channel URLs and source headers")
+    s.add_argument("--replace", action="store_true", help="import: remove items that are not in the file")
+    s.add_argument("--dry-run", action="store_true")
+
+    s = sp.add_parser("sources", help="list or refresh the extra CVE sources (config.yml `sources:` / web UI)")
+    s.add_argument("--refresh", nargs="?", const="all", metavar="NAME", help="download now (all, or one source)")
+
+    s = sp.add_parser("patched", help="list patched CVEs in a time range")
+    s.add_argument("--range", default="last", help="last | 24h | 7d | 30d | 90d | 1y | custom")
+    s.add_argument("--from", dest="frm", default="", help="custom range start (YYYY-MM-DD)")
+    s.add_argument("--to", default="", help="custom range end (YYYY-MM-DD)")
+    s.add_argument("--host", default="")
+
     a = ap.parse_args(argv)
     if a.config:
         reload(a.config)
@@ -183,6 +206,8 @@ def main(argv=None):
         if a.host:
             rows = [r for r in rows if r["host_name"] in a.host]
         text, summary = patch.build_playbook([r["id"] for r in rows])
+        if summary["hosts"]:
+            db.patch_run("playbook", f"playbook generated (cli): {summary['hosts']} hosts, {summary['packages']} packages")
         if a.output:
             with open(a.output, "w") as fh:
                 fh.write(text)
@@ -202,6 +227,51 @@ def main(argv=None):
             sys.exit(1)
     elif a.cmd == "notify":
         print(f"sent {asyncio.run(notify.dispatch(dry_run=a.dry_run))} alerts")
+    elif a.cmd == "reprovision":
+        from . import reprovision
+        if a.sbom:
+            with open(a.sbom) as fh:
+                text, summary = reprovision.build(json.load(fh), a.mode, a.target)
+        else:
+            h = db.q1("SELECT id FROM hosts WHERE name=?", (a.host,))
+            if not h:
+                sys.exit(f"unknown system {a.host!r}")
+            text, summary = reprovision.for_host(h["id"], a.mode, a.target)
+        if a.output:
+            with open(a.output, "w") as fh:
+                fh.write(text)
+            print(f"wrote {a.output}: {summary}", file=sys.stderr)
+        else:
+            print(text)
+    elif a.cmd == "settings":
+        from . import settings_io
+        if a.action == "export":
+            print(settings_io.export_yaml(a.secrets), end="")
+        else:
+            body = open(a.file).read() if a.file else sys.stdin.read()
+            res = settings_io.import_bundle(settings_io.parse(body), replace=a.replace, dry_run=a.dry_run)
+            print(res)
+            if res["errors"]:
+                sys.exit(1)
+    elif a.cmd == "sources":
+        from . import sources
+        sources.sync_config_sources()
+        if a.refresh:
+            names = [s["name"] for s in sources.all_sources() if s["enabled"]] if a.refresh == "all" else [a.refresh]
+            for n in names:
+                print(asyncio.run(sources.refresh(n, force=True)))
+        for s in sources.all_sources():
+            print(f"{s['name']:<20} {s['type']:<15} {'on ' if s['enabled'] else 'off'} {s['origin']:<6} "
+                  f"{s['count'] or 0:>8} {s['status'] or 'not loaded'} {s['error'] or ''}")
+    elif a.cmd == "patched":
+        from . import patched
+        d = patched.query({"range": a.range, "from": a.frm, "to": a.to, "host": a.host})
+        st = d["stats"]
+        print(f"# {d['label']}: {st['cves']} CVEs / {st['findings']} findings patched on {st['systems']} systems, "
+              f"median {st['median_days']} days to patch")
+        for f in d["rows"]:
+            print(f"{f['resolved_at'][:16]}  {f['host_name']:<20} {f['severity'] or '':<8} {f['vuln_id']:<18} "
+                  f"{f['package']} {f['version']} -> {f['resolved_version'] or '-'} ({f['resolution'] or '?'})")
 
 
 if __name__ == "__main__":

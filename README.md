@@ -3,6 +3,7 @@
 diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent, and it has no SaaS dependency. It ships as a native package (deb/rpm), an OCI image, an AppImage and a Flatpak.
 
 * **Public CVE sources:** [OSV.dev](https://osv.dev) is the main source. It aggregates the Debian, Ubuntu, Alpine, AlmaLinux, Rocky, SUSE and Red Hat security trackers, with exact fixed versions per distro release. **NVD** adds CVSS scores and descriptions, and **CISA KEV** flags known exploited CVEs.
+* **More CVE sources, your own included:** the Debian security tracker (adds CVEs Debian hasn't fixed yet), Alpine secdb, FIRST **EPSS** exploit probabilities, any OSV-format feed (a GHSA export, Go vulndb, your own advisories), and **custom JSON / YAML / CSV feeds** mapped field by field. Configure them in `config.yml` or on the **CVE sources** page. See [CVE sources](#cve-sources).
 * **Local systems:** hosts are scanned agentless over SSH (or locally) for installed `dpkg`, `rpm` and `apk` packages. No root is needed.
 * **Repos:** each host's configured repositories are read (`sources.list`, deb822 `.sources`, `yum.repos.d`, `/etc/apk/repositories`), and their package indexes are downloaded. This includes local mirrors, Aptly, Pulp and Nexus. diysca can then tell you whether the fix is actually installable from *your* repos.
 * **Language packages:** PyPI, npm, RubyGems, Maven (from the `pom.properties` inside jars), Packagist, crates.io and Go are covered. diysca reads installed packages (`*.dist-info`, `node_modules`, gemspecs, jars) and lockfiles (`package-lock.json`, `yarn.lock`, `Gemfile.lock`, `poetry.lock`, `Pipfile.lock`, `requirements*.txt`, `composer.lock`, `Cargo.lock`, `go.mod`).
@@ -14,10 +15,12 @@ diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent
 * **SBOM:** one CycloneDX 1.5 JSON file per system, including a `vulnerabilities` section.
 * **Alerts:** sent via [Apprise](https://github.com/caronc/apprise/wiki), which covers ntfy, Gotify, e-mail, Telegram, Slack, Matrix, Discord, Teams, webhooks and more. Subscriptions decide *which packages on which systems at which severity* go to *which channel*. Each finding is sent only once.
 * **Ansible inventories:** INI and YAML, groups, `:children`, `:vars`, `group_vars/`, `host_vars/` and host ranges. If `ansible-inventory` is installed, it is used instead, so dynamic and vaulted inventories also work.
-* **Web UI:** dashboard, systems, packages, findings and patching pages. Findings can be filtered by system, group, OS, host or container, package, ecosystem, CVE, severity, fix availability and KEV. Filters can be saved, and you can manage channels and subscriptions from the UI.
+* **Patched CVEs:** what was patched, where, when and how (upgraded or removed), with a Grafana-style time picker: since the last patching of each system, the last 24 hours, 7, 30 or 90 days, a year, or a custom range. Playbook runs and repo updates show up as annotations on the chart.
+* **Reprovision from the SBOM:** every system's SBOM records its repositories, OS packages, pip/gem packages and container images. diysca turns it (or any CycloneDX SBOM with package URLs, e.g. from Syft or Trivy) into an Ansible playbook that rebuilds the system on a fresh install of the same OS release, at the recorded versions or with fixable vulnerabilities fixed.
+* **Web UI:** a classic Grafana-style dark UI (light theme on request). Click the logo to show the menu with or without names. Pages: dashboard, systems, **Findings** (tabs Findings and Packages), **Patching** (tabs Patch and Patched CVEs), and one **Settings** area (General, CVE Sources, Notifications, Repo Manager, Import / Export). Findings can be filtered by system, group, OS, host or container, package, ecosystem, CVE, severity, fix availability and KEV. Filters can be saved, and you can manage channels and subscriptions from the UI.
 * **Database:** PostgreSQL. SQLite remains available for single-user desktop installs, i.e. the AppImage and Flatpak.
 
-![dashboard](docs/dash.png)
+![patched CVEs](docs/patched.png)
 
 Example alert:
 
@@ -98,6 +101,30 @@ Server installs use PostgreSQL. Set `database_url` in the config, or the `DIYSCA
 1. Open **Patching**. You can also select findings on **Findings**, or click **Patch playbook** on a system. Then download the playbook and run it with `ansible-playbook -i <inventory> diysca-patch.yml --check --diff`, followed by a real run.
 2. For fixes that aren't in your repos yet, configure `repo_managers` (see `config.example.yml`). Use **Dry run** and then **Run** on the Patching page, or `diysca repo-update <name> [--run] [--stage Test]`. The affected hosts are rescanned afterwards, so their findings move to "fix available in your repos".
 
+### Reprovision a system from its SBOM
+
+On a system, click **Reprovision playbook**, or upload an SBOM under **Patching > Reprovision**, or run `diysca reprovision system_a [--mode exact] [--target newbox] -o rebuild.yml` (or `--sbom file.cdx.json`). The playbook checks the target's OS release, adds the original repositories, installs the OS packages at the recorded versions (`--mode fixed`, the default, raises vulnerable packages to the fixed version in your repos), installs pip and gem packages, and pulls the container images. npm, Maven, Composer, Cargo and Go dependencies are listed as comments because they belong to the application's build. Repository signing keys aren't in an SBOM, so install them first.
+
+### Settings import / export
+
+**Settings > Import / Export** (or `diysca settings export|import`) moves CVE sources, alert channels, subscriptions and saved filters as one YAML file. Secrets are written as `***` unless you ask for them. Importing `***` keeps the stored value, so a masked export can be edited and re-imported. Use preview first; "replace" also removes items that are not in the file.
+
+### CVE sources
+
+| type | what it adds | default URL |
+|---|---|---|
+| `debian-tracker` | CVEs Debian hasn't fixed yet (status "open") and Debian's urgency | security-tracker.debian.org/tracker/data/json |
+| `alpine-secdb` | Alpine secfixes per release and repo | secdb.alpinelinux.org/v3.20/main.json |
+| `osv` | any OSV-format feed: `.zip`, JSON record or list, NDJSON, or a local directory | – |
+| `custom` | your own JSON / YAML / CSV feed, mapped with `fields:` | – |
+| `epss` | FIRST EPSS probability per CVE, shown on findings | epss.cyentia.com/epss_scores-current.csv.gz |
+
+Records from extra sources keep their own id, prefixed with the source name (`debian-tracker/CVE-2025-1234`), so you can see which source reported a finding. When OSV and an extra source report the same CVE for the same package, you get one finding listing both. Sources added in the web UI must be http(s) URLs. Local files and directories (`path:` or `file://`) can only be configured in `config.yml`. Examples are in `config.example.yml`.
+
+### Patched CVEs
+
+A finding is patched when a scan no longer sees it. diysca stores when that happened, the version installed at that point, and how it went away: `upgraded`, `removed`, or `not-affected` (the advisory changed). The **Patched CVEs** page and `GET /api/patched?range=7d` show them per time range. `range=last` means the most recent patching of each system.
+
 ### CLI
 
 ```bash
@@ -112,6 +139,11 @@ diysca notify --dry-run
 diysca playbook --filter 'fix=repo&severity=HIGH' -o patch.yml
 diysca repo-update                      # list repo managers and what they would fix
 diysca repo-update satellite --stage Test --run
+diysca sources --refresh                # download the extra CVE sources now
+diysca settings export > settings.yml   # sources, channels, subscriptions, saved filters (secrets masked)
+diysca settings import settings.yml --dry-run
+diysca reprovision system_a -o rebuild.yml
+diysca patched --range 7d               # what got patched in the last week
 diysca serve                            # UI + scheduler on :8080
 ```
 
@@ -160,7 +192,7 @@ Supported distros: Debian, Ubuntu, Alpine, Rocky, AlmaLinux, RHEL (including 10)
 
 ## API
 
-`GET /api/hosts`, `/api/packages`, `/api/findings` take the same query parameters as the UI filters (`host`, `group`, `os`, `package`, `severity`, `fix=repo|upstream|none`, `kev=1`, `status`). There is also `GET /api/hosts/{id}/sbom` and `POST /api/scan[?host=name]`.
+`GET /api/hosts`, `/api/packages`, `/api/findings` take the same query parameters as the UI filters (`host`, `group`, `os`, `package`, `severity`, `fix=repo|upstream|none`, `kev=1`, `status`). There is also `GET /api/hosts/{id}/sbom`, `GET /api/patched?range=last|24h|7d|30d|90d|1y|custom&from=&to=`, `GET /api/sources` and `POST /api/scan[?host=name]`.
 
 ## Known limitations / roadmap
 

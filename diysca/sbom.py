@@ -8,6 +8,16 @@ from urllib.parse import quote
 from . import __version__, db
 
 PURL_TYPE = {"deb": "deb", "rpm": "rpm", "apk": "apk"}
+LANG_PURL = {"PyPI": "pypi", "npm": "npm", "RubyGems": "gem", "Maven": "maven", "Packagist": "composer",
+             "crates.io": "cargo", "Go": "golang"}
+
+
+def lang_purl(eco: str, name: str, version: str) -> str:
+    t = LANG_PURL.get(eco, "generic")
+    if t == "maven" and ":" in name:
+        g, a = name.split(":", 1)
+        return f"pkg:maven/{quote(g)}/{quote(a)}@{quote(version)}"
+    return f"pkg:{t}/{quote(name, safe='/')}@{quote(version)}"
 
 
 def purl(pkg_type: str, os_id: str, name: str, version: str, arch: str = "", distro: str = "") -> str:
@@ -26,7 +36,15 @@ def build_sbom(host_id: int) -> dict:
         raise KeyError(host_id)
     distro = f"{h['os_id']}-{h['os_version']}" if h["os_id"] else ""
     comps, refs = [], {}
-    for p in db.q("SELECT * FROM packages WHERE host_id=? ORDER BY name", (host_id,)):
+    for p in db.q("SELECT * FROM packages WHERE host_id=? ORDER BY ecosystem, name", (host_id,)):
+        if p["ecosystem"]:
+            ref = lang_purl(p["ecosystem"], p["name"], p["version"])
+            c = {"type": "library", "bom-ref": f"{ref}#{len(comps)}", "name": p["name"], "version": p["version"],
+                 "purl": ref, "properties": [{"name": "diysca:ecosystem", "value": p["ecosystem"]},
+                                             {"name": "diysca:location", "value": p["location"] or ""}]}
+            refs.setdefault(p["name"], []).append(c["bom-ref"])
+            comps.append(c)
+            continue
         ref = purl(p["type"], h["os_id"], p["name"], p["version"], p["arch"], distro)
         refs.setdefault(p["source_name"] or p["name"], []).append(ref)
         c = {"type": "library" if p["name"].startswith("lib") else "application", "bom-ref": ref,
@@ -39,6 +57,11 @@ def build_sbom(host_id: int) -> dict:
         if props:
             c["properties"] = props
         comps.append(c)
+
+    for ct in db.q("SELECT * FROM hosts WHERE parent_id=? AND kind='container' ORDER BY name", (host_id,)):
+        comps.append({"type": "container", "bom-ref": f"container:{ct['name']}", "name": ct["image"] or ct["name"],
+                      "properties": [{"name": "diysca:container_name", "value": ct["name"].split("/", 1)[-1]},
+                                     {"name": "diysca:container_runtime", "value": ct["container_runtime"] or ""}]})
 
     vulns = []
     for f in db.q("""SELECT f.*, v.summary AS vsum, v.refs FROM findings f LEFT JOIN vulns v ON v.id = f.vuln_id
@@ -76,7 +99,15 @@ def build_sbom(host_id: int) -> dict:
                 "properties": [{"name": "diysca:address", "value": h["address"] or ""},
                                {"name": "diysca:groups", "value": h["groups"] or ""},
                                {"name": "diysca:kernel", "value": h["kernel"] or ""},
-                               {"name": "diysca:arch", "value": h["arch"] or ""}],
+                               {"name": "diysca:arch", "value": h["arch"] or ""},
+                               {"name": "diysca:os_id", "value": h["os_id"] or ""},
+                               {"name": "diysca:os_version", "value": h["os_version"] or ""},
+                               {"name": "diysca:pkg_type", "value": h["pkg_type"] or ""},
+                               *[{"name": "diysca:repo", "value": json.dumps(
+                                   {"kind": r["kind"], "url": r["url"], "suite": r["suite"] or "",
+                                    "components": r["components"] or "", "name": r["name"] or "",
+                                    "enabled": bool(r["enabled"])})}
+                                 for r in db.q("SELECT * FROM repos WHERE host_id=? ORDER BY id", (host_id,))]],
             },
         },
         "components": comps,

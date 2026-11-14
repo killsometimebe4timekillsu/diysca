@@ -1,7 +1,7 @@
 {% extends "base.html" %}{% import "macros.html" as m %}
 {% block title %}Patching{% endblock %}
 {% block content %}
-<h1>Patching</h1>
+{{ m.view_tabs(page) }}
 {% if result %}
 <div class="card"><h2>{{ 'Dry run' if result.dry_run else 'Run' }}: {{ result.manager }} <span class="{{ 'ok' if result.ok else 'bad' }}">{{ 'OK' if result.ok else 'FAILED' }}</span></h2>
 <table><tr><th>Step</th><th>Detail</th><th>Status</th><th>Info</th></tr>
@@ -37,4 +37,13 @@
 </form></div>
 {% else %}<p class="muted">No repo managers configured.</p>{% endfor %}
 </div>
+<div class="card"><h2>3. Reprovision a system from its SBOM</h2>
+<p class="muted">Turns a CycloneDX SBOM into an Ansible playbook that rebuilds the system on a fresh install of the same OS release: same repositories, OS packages at the recorded versions, pip and gem packages, and the container images it ran. Use the <b>Reprovision playbook</b> button on a system, or upload an SBOM here (from diysca or another tool that writes package URLs, such as Syft or Trivy).</p>
+{% if reprovision_error %}<div class="notice bad">{{ reprovision_error }}</div>{% endif %}
+<form method="post" action="/reprovision" enctype="multipart/form-data" class="filters">
+  <label>SBOM (CycloneDX JSON)<input type="file" name="file" accept=".json" required></label>
+  <label>Versions<select name="mode"><option value="fixed">as recorded, vulnerable ones fixed from the repos</option><option value="exact">exactly as recorded</option></select></label>
+  <label>Target host or group<input name="target" placeholder="default: the system's name"></label>
+  <button>Create playbook</button>
+</form></div>
 {% endblock %}

@@ -1,7 +1,6 @@
 {% extends "base.html" %}{% import "macros.html" as m %}
 {% block title %}Systems{% endblock %}
 {% block content %}
-<h1>Systems</h1>
 <div class="card">
 <form class="filters" method="get">
   <label>Name / address<input name="host" value="{{ args.host or '' }}" placeholder="web*"></label>

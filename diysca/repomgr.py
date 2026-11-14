@@ -293,4 +293,6 @@ async def run(name: str, dry_run: bool = True, stages: list[str] | None = None,
         repos._CACHE.clear()  # next scan re-reads the repo indexes
         db.event("repo", f"{name}: {'ok' if res.ok else 'FAILED'} - "
                          + "; ".join(f"{s.action} {s.detail} [{s.status}]" for s in res.steps)[:900])
+        if res.ok:
+            db.patch_run("repo", f"{name} ({kind}) updated" + (f", promoted to {', '.join(stages)}" if stages else ""))
     return res

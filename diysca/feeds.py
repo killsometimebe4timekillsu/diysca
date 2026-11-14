@@ -99,6 +99,9 @@ def vuln_severity(v: dict) -> tuple[float | None, str, str]:
     if score is not None:
         label = score_to_sev(score)
     ds = v.get("database_specific") or {}
+    if score is None and isinstance(ds.get("cvss_score"), (int, float)):
+        score = float(ds["cvss_score"])  # custom sources may give a bare score
+        label = score_to_sev(score)
     if label == "UNKNOWN" and isinstance(ds.get("severity"), str):
         label = norm_sev(ds["severity"])
     for a in v.get("affected") or []:
@@ -308,7 +311,8 @@ def apply_enrichment():
               severity = CASE WHEN severity IS NULL OR severity='UNKNOWN'
                          THEN COALESCE((SELECT severity FROM nvd_cache n WHERE n.cve=findings.cve), 'UNKNOWN')
                          ELSE severity END,
-              kev = CASE WHEN EXISTS(SELECT 1 FROM kev k WHERE k.cve=findings.cve) THEN 1 ELSE 0 END""")
+              kev = CASE WHEN EXISTS(SELECT 1 FROM kev k WHERE k.cve=findings.cve) THEN 1 ELSE 0 END,
+              epss = (SELECT score FROM epss e WHERE e.cve=findings.cve)""")
 
 
 # ----------------------------------------------------------------- KEV
@@ -501,4 +505,8 @@ class BulkOSVClient:
 
 
 def make_osv_client():
-    return BulkOSVClient() if settings.osv_mode == "bulk" else OSVClient()
+    """OSV (api or bulk), plus the extra sources from config.yml / the Sources page when any are enabled."""
+    from .sources import MultiClient, SourcesClient
+    primary = BulkOSVClient() if settings.osv_mode == "bulk" else OSVClient()
+    extra = SourcesClient()
+    return MultiClient(primary, extra) if extra.names else primary

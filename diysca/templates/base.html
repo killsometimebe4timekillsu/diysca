@@ -5,60 +5,197 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}diysca{% endblock %} · diysca</title>
 {% if running %}<meta http-equiv="refresh" content="10">{% endif %}
+<script>try{var t=localStorage.getItem("diysca-theme");if(t)document.documentElement.dataset.theme=t;if(localStorage.getItem("diysca-nav")==="wide")document.documentElement.dataset.nav="wide"}catch(e){}</script>
 <style>
-:root{--bg:#f6f7f9;--card:#fff;--fg:#1d2330;--muted:#677084;--line:#e2e5ea;--acc:#2f6fdf;
---crit:#b3261e;--high:#e2541b;--med:#c98a00;--low:#4a7fc1;--unk:#8a90a0;--ok:#2e8b57}
-@media (prefers-color-scheme:dark){:root{--bg:#14171c;--card:#1c2027;--fg:#e4e7ec;--muted:#98a1b3;--line:#2c323c;--acc:#6ea0ff}}
-*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;background:var(--bg);color:var(--fg)}
-a{color:var(--acc);text-decoration:none}a:hover{text-decoration:underline}
-header{background:var(--card);border-bottom:1px solid var(--line);padding:0 16px;display:flex;align-items:center;gap:20px;flex-wrap:wrap}
-header .brand{font-weight:700;font-size:16px;padding:12px 0}header nav a{padding:14px 8px;display:inline-block;color:var(--muted)}
-header nav a.on{color:var(--fg);border-bottom:2px solid var(--acc)}header .spacer{flex:1}
-main{max-width:1400px;margin:0 auto;padding:16px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px;margin-bottom:16px;overflow-x:auto}
-h1{font-size:20px;margin:4px 0 14px}h2{font-size:15px;margin:0 0 10px}
-table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);vertical-align:top}
-th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.03em}
-tr:hover td{background:color-mix(in srgb,var(--acc) 5%,transparent)}
-.sev{display:inline-block;padding:1px 7px;border-radius:10px;font-size:11px;font-weight:700;color:#fff;background:var(--unk)}
-.sev.CRITICAL{background:var(--crit)}.sev.HIGH{background:var(--high)}.sev.MEDIUM{background:var(--med)}.sev.LOW{background:var(--low)}
-.tag{display:inline-block;padding:0 6px;border:1px solid var(--line);border-radius:4px;font-size:12px;color:var(--muted);margin:1px}
-.kev{background:#000;color:#ff0;padding:1px 5px;border-radius:3px;font-size:11px;font-weight:700}
-.ok{color:var(--ok)}.bad{color:var(--crit)}.muted{color:var(--muted)}.mono{font-family:ui-monospace,Menlo,monospace;font-size:12.5px}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:16px}
-.stat{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:12px}.stat b{font-size:24px;display:block}
+/* Classic Grafana look: dark canvas, icon side menu, flat panels, 2px corners, small panel titles.
+   Dark is the default; light is an explicit choice (theme button at the bottom of the side menu). */
+:root{
+  --canvas:#111217;--panel:#181b1f;--panel-2:#22252b;--border:#2a2d33;--border-strong:#3d4048;
+  --text:#ccccdc;--text-strong:#e4e7eb;--muted:#8e8e98;--link:#6e9fff;--primary:#3d71d9;--primary-hover:#4f80e1;
+  --input:#111217;--row-hover:#1f2228;--menu:#181b1f;
+  --red:#f2495c;--orange:#ff9830;--yellow:#fade2a;--green:#73bf69;--blue:#5794f2;--purple:#b877d9;--grey:#8e8e98;
+  --sev-text:#111217;
+  --font:Inter,Roboto,"Helvetica Neue",Arial,sans-serif;--mono:"Roboto Mono",ui-monospace,Menlo,Consolas,monospace;
+  color-scheme:dark;
+}
+:root[data-theme="light"]{
+  --canvas:#f4f5f5;--panel:#ffffff;--panel-2:#f7f8fa;--border:#dcdee1;--border-strong:#c7d0d9;
+  --text:#24292e;--text-strong:#1f1f20;--muted:#6a6e73;--link:#1f62e0;--primary:#3d71d9;--primary-hover:#2f5fc7;
+  --input:#ffffff;--row-hover:#f1f3f5;--menu:#ffffff;
+  --red:#d10e5c;--orange:#e55400;--yellow:#c79000;--green:#1a7f4b;--blue:#1f62e0;--purple:#8a3db8;--grey:#6a6e73;
+  --sev-text:#ffffff;color-scheme:light;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--canvas);color:var(--text);font:13px/1.5 var(--font)}
+a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
+:focus-visible{outline:2px solid var(--primary);outline-offset:1px}
+
+/* side menu */
+.side{position:fixed;inset:0 auto 0 0;width:56px;background:var(--menu);border-right:1px solid var(--border);display:flex;flex-direction:column;align-items:center;padding:8px 0;gap:2px;z-index:20}
+.side .logo{width:40px;height:40px;display:grid;place-items:center;margin-bottom:10px}
+.side a,.side button{position:relative;width:40px;height:40px;display:grid;place-items:center;border-radius:2px;color:var(--muted);background:none;border:0;padding:0;cursor:pointer}
+.side a:hover,.side button:hover{color:var(--text-strong);background:var(--panel-2);text-decoration:none}
+.side a.on{color:var(--text-strong)}
+.side a.on::before{content:"";position:absolute;left:-8px;top:6px;bottom:6px;width:3px;border-radius:2px;background:linear-gradient(180deg,#f05a28,#fbca0a)}
+.side svg{width:20px;height:20px}
+.side .tip{position:absolute;left:48px;top:50%;transform:translateY(-50%);background:var(--panel-2);color:var(--text-strong);border:1px solid var(--border);padding:4px 10px;border-radius:2px;white-space:nowrap;font-size:13px;pointer-events:none;opacity:0;transition:opacity .1s}
+.side a:hover .tip,.side button:hover .tip,.side a:focus-visible .tip{opacity:1}
+.side .spacer{flex:1}
+.side .logo{background:none;border:0;cursor:pointer}
+.side .brand,.side .label{display:none}
+html[data-nav=wide] .side{width:200px;align-items:stretch;padding:8px}
+html[data-nav=wide] .side a,html[data-nav=wide] .side button{width:auto;display:flex;align-items:center;gap:12px;padding:0 10px;justify-content:flex-start}
+html[data-nav=wide] .side .tip{display:none}
+html[data-nav=wide] .side .label,html[data-nav=wide] .side .brand{display:inline;font-size:13px;color:inherit;white-space:nowrap}
+html[data-nav=wide] .side .brand{font-size:16px;font-weight:500;color:var(--text-strong)}
+html[data-nav=wide] .side a.on::before{left:0}
+html[data-nav=wide] .wrap,html[data-nav=wide] footer{margin-left:200px}
+.side hr{width:32px;border:0;border-top:1px solid var(--border);margin:6px 0}
+html[data-nav=wide] .side hr{width:auto}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);overflow-x:auto}
+.tabs a{padding:8px 14px;color:var(--muted);font-weight:500;border-bottom:2px solid transparent;white-space:nowrap}
+.tabs a:hover{color:var(--text-strong);text-decoration:none}
+.tabs a.on{color:var(--text-strong);border-bottom-color:#f05a28}
+.notice ul{margin:4px 0 0 18px;padding:0}
+
+/* top bar */
+.wrap{margin-left:56px;min-width:0}
+.topbar{position:sticky;top:0;z-index:10;background:var(--canvas);display:flex;align-items:center;gap:8px;padding:8px 16px;min-height:48px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.crumbs{display:flex;align-items:center;gap:6px;font-size:16px;color:var(--muted);min-width:0}
+.crumbs b{color:var(--text-strong);font-weight:500}
+.topbar .spacer{flex:1}
+.status-pill{font-size:12px;color:var(--orange);border:1px solid var(--border);border-radius:2px;padding:3px 8px}
+main{padding:16px;display:flex;flex-direction:column;gap:12px;max-width:1800px}
+h1{font-size:18px;font-weight:500;color:var(--text-strong);margin:0}
+h2{font-size:14px;font-weight:500;color:var(--text-strong);margin:0 0 8px}
+p{margin:0 0 8px}
+
+/* panels */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:2px;padding:8px 12px 12px;overflow-x:auto;min-width:0}
+.card .card{background:var(--panel-2)}
+.row{display:flex;gap:12px;flex-wrap:wrap}.row>*{flex:1;min-width:min(100%,360px)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px}
+.stat{background:var(--panel);border:1px solid var(--border);border-radius:2px;padding:8px 12px 10px;display:flex;flex-direction:column;color:var(--text);min-height:92px}
+.stat:hover{text-decoration:none;border-color:var(--border-strong)}
+.stat .muted{font-size:13px;font-weight:500;color:var(--text)}
+.stat b{font-size:32px;font-weight:500;line-height:1.2;margin-top:auto;color:var(--text-strong);font-variant-numeric:tabular-nums}
+.stat b.ok{color:var(--green)}.stat b.bad{color:var(--red)}.stat b.warn{color:var(--orange)}.stat b.info{color:var(--blue)}
+.stat small{color:var(--muted);font-size:12px}
+
+/* tables */
+table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}
+th{text-align:left;font-weight:500;color:var(--link);font-size:13px;padding:6px 8px;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--panel)}
+td{padding:6px 8px;border-bottom:1px solid var(--border);vertical-align:top}
+tr:hover td{background:var(--row-hover)}
+details summary{cursor:pointer;color:var(--link)}
+
+/* badges */
+.sev{display:inline-block;padding:0 6px;border-radius:2px;font-size:11px;font-weight:500;line-height:18px;color:var(--sev-text);background:var(--grey);text-transform:uppercase;letter-spacing:.02em}
+.sev.CRITICAL{background:var(--red)}.sev.HIGH{background:var(--orange)}.sev.MEDIUM{background:var(--yellow)}.sev.LOW{background:var(--blue)}
+.tag{display:inline-block;padding:0 6px;border:1px solid var(--border-strong);border-radius:2px;font-size:12px;color:var(--text);margin:1px;line-height:18px}
+.kev{display:inline-block;border:1px solid var(--red);color:var(--red);padding:0 5px;border-radius:2px;font-size:11px;font-weight:500;line-height:16px}
+.ok{color:var(--green)}.bad{color:var(--red)}.warn{color:var(--orange)}.muted{color:var(--muted)}
+.mono{font-family:var(--mono);font-size:12px}
+
+/* forms */
 form.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:end}
-form.filters label,form.stack label{display:flex;flex-direction:column;font-size:12px;color:var(--muted);gap:2px}
-input,select,button{font:inherit;padding:5px 8px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--fg)}
-button,.btn{background:var(--acc);color:#fff;border-color:var(--acc);cursor:pointer;padding:5px 12px;border-radius:5px;display:inline-block}
-button.secondary{background:transparent;color:var(--acc)}button.danger{background:transparent;color:var(--crit);border-color:var(--crit)}
-form.inline{display:inline}.row{display:flex;gap:16px;flex-wrap:wrap}.row>*{flex:1;min-width:300px}
+form.filters label,form.stack label{display:flex;flex-direction:column;font-size:12px;color:var(--text);gap:2px;font-weight:500}
+input,select,textarea{font:inherit;height:32px;padding:0 8px;border:1px solid var(--border-strong);border-radius:2px;background:var(--input);color:var(--text);max-width:100%}
+textarea{height:auto;padding:6px 8px;font-family:var(--mono);font-size:12px}
+input[type=checkbox]{height:auto;accent-color:var(--primary)}
+button,.btn{font:inherit;font-weight:500;height:32px;padding:0 14px;border-radius:2px;border:1px solid var(--primary);background:var(--primary);color:#fff;cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+button:hover,.btn:hover{background:var(--primary-hover);text-decoration:none}
+button.secondary,.btn.secondary{background:var(--panel-2);border-color:var(--border-strong);color:var(--text)}
+button.secondary:hover,.btn.secondary:hover{background:var(--row-hover);color:var(--text-strong)}
+button.danger{background:transparent;color:var(--red);border-color:var(--red)}
+button.sm{height:24px;padding:0 8px;font-size:12px}
+form.inline{display:inline}
 .saved{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:10px;font-size:13px}
-.saved .chip{border:1px solid var(--line);border-radius:14px;padding:2px 4px 2px 10px;display:inline-flex;gap:4px;align-items:center}
-.saved .chip button{padding:0 6px;background:none;border:0;color:var(--muted)}
-.notice{background:color-mix(in srgb,var(--acc) 12%,transparent);border-radius:6px;padding:8px 12px;margin-bottom:12px}
-pre{white-space:pre-wrap;word-break:break-word}
+.saved .chip{border:1px solid var(--border-strong);border-radius:2px;padding:0 2px 0 8px;display:inline-flex;gap:4px;align-items:center;height:26px}
+.saved .chip button{height:22px;padding:0 6px;background:none;border:0;color:var(--muted)}
+.notice{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--blue);padding:8px 12px}
+.notice.bad{border-left-color:var(--red);color:var(--text)}
+pre{white-space:pre-wrap;word-break:break-word;font-family:var(--mono);font-size:12px;background:var(--input);border:1px solid var(--border);padding:8px;border-radius:2px}
+
+/* time picker (Patched view) */
+.picker{position:relative}
+.picker summary{list-style:none;height:32px;display:inline-flex;align-items:center;gap:8px;padding:0 12px;border:1px solid var(--border-strong);border-radius:2px;background:var(--panel-2);color:var(--text);font-weight:500;cursor:pointer}
+.picker summary::-webkit-details-marker{display:none}
+.picker[open] summary{border-color:var(--primary)}
+.picker .menu{position:absolute;right:0;top:36px;z-index:30;background:var(--panel);border:1px solid var(--border-strong);border-radius:2px;box-shadow:0 8px 24px rgba(0,0,0,.4);display:flex;width:min(560px,calc(100vw - 80px));flex-wrap:wrap}
+.picker .menu>div{flex:1;min-width:220px;padding:12px}
+.picker .menu>div+div{border-left:1px solid var(--border)}
+.picker .menu a{display:block;padding:5px 8px;color:var(--text);border-radius:2px}
+.picker .menu a:hover,.picker .menu a.on{background:var(--row-hover);text-decoration:none;color:var(--text-strong)}
+.picker .menu a.on{border-left:2px solid var(--primary)}
+.picker .menu h3{font-size:12px;font-weight:500;margin:0 0 8px;color:var(--muted)}
+
+/* charts */
+svg.chart{width:100%;height:auto;display:block}
+svg.chart .grid{stroke:var(--border);stroke-width:1}
+svg.chart .axis{fill:var(--muted);font-size:11px;font-family:var(--font)}
+svg.chart .bar.CRITICAL{fill:var(--red)}svg.chart .bar.HIGH{fill:var(--orange)}svg.chart .bar.MEDIUM{fill:var(--yellow)}
+svg.chart .bar.LOW{fill:var(--blue)}svg.chart .bar.UNKNOWN{fill:var(--grey)}
+svg.chart .annot{stroke:var(--purple);stroke-width:1;stroke-dasharray:3 3}svg.chart .annot.repo{stroke:var(--green)}
+svg.chart .annot-mark{fill:var(--purple)}svg.chart .annot-mark.repo{fill:var(--green)}
+.legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--text);margin-top:6px}
+.legend i{display:inline-block;width:14px;height:4px;border-radius:1px;vertical-align:middle;margin-right:5px}
+
+footer{margin-left:56px;padding:8px 16px 16px;color:var(--muted);font-size:12px}
+
+@media (max-width:700px){
+  .side{inset:auto 0 0 0;width:auto;height:52px;flex-direction:row;justify-content:space-around;border-right:0;border-top:1px solid var(--border);padding:0 4px;overflow-x:auto}
+  .side .logo,.side .spacer,.side .tip{display:none}
+  .side a.on::before{left:6px;right:6px;top:auto;bottom:-6px;height:3px;width:auto}
+  .wrap,footer,html[data-nav=wide] .wrap,html[data-nav=wide] footer{margin-left:0}
+  html[data-nav=wide] .side{width:auto;flex-direction:row;padding:0 4px}
+  html[data-nav=wide] .side .label,.side hr{display:none}
+  footer{padding-bottom:70px}
+  main{padding:12px 12px 70px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
 </style>
 </head>
 <body>
-<header>
-  <span class="brand">🛡️ diysca</span>
-  <nav>
-    <a href="/" class="{{ 'on' if page=='dashboard' }}">Dashboard</a>
-    <a href="/systems" class="{{ 'on' if page in ('systems','system') }}">Systems</a>
-    <a href="/packages" class="{{ 'on' if page=='packages' }}">Packages</a>
-    <a href="/findings" class="{{ 'on' if page in ('findings','finding') }}">Findings</a>
-    <a href="/patching" class="{{ 'on' if page=='patching' }}">Patching</a>
-    <a href="/alerts" class="{{ 'on' if page=='alerts' }}">Alerts</a>
-  </nav>
+{% set nav = [
+  ('dashboard', '/', 'Dashboard', 'M3 3h7v7H3zM14 3h7v4h-7zM14 10h7v11h-7zM3 13h7v8H3z'),
+  ('systems', '/systems', 'Systems', 'M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01'),
+  ('findings', '/findings', 'Findings', 'M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6zM12 8v5M12 16h.01'),
+  ('patching', '/patching', 'Patching', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16.5V8M8 11.5l4-4 4 4'),
+] %}
+{% set gear = 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z' %}
+{% set section = 'settings' if tab is defined else {'system': 'systems', 'finding': 'findings', 'packages': 'findings', 'patched': 'patching'}.get(page, page) %}
+<nav class="side" aria-label="Main">
+  <button type="button" class="logo" id="navbtn" aria-label="Show or hide menu names" title="Show or hide menu names"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z" stroke="#f05a28" fill="rgba(240,90,40,.12)"/><path d="M8.5 12l2.5 2.5 4.5-4.5" stroke="#fbca0a"/></svg><span class="brand">diysca</span></button>
+  {% for key, href, label, d in nav %}
+  <a href="{{ href }}" class="{{ 'on' if section == key }}" aria-label="{{ label }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{{ d }}"/></svg><span class="label">{{ label }}</span><span class="tip">{{ label }}</span></a>
+  {% endfor %}
   <span class="spacer"></span>
-  {% if running %}<span class="muted">⏳ scan running…</span>{% endif %}
-  <form method="post" action="/scan" class="inline"><button>Scan all</button></form>
-</header>
+  <a href="/settings" class="{{ 'on' if section == 'settings' }}" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{{ gear }}"/></svg><span class="label">Settings</span><span class="tip">Settings</span></a>
+  <button type="button" id="themebtn" aria-label="Switch theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/></svg><span class="label">Light / dark</span><span class="tip">Switch light / dark</span></button>
+</nav>
+<div class="wrap">
+<div class="topbar">
+  <div class="crumbs"><span>diysca</span><span>/</span><b>{{ self.title() }}</b></div>
+  <span class="spacer"></span>
+  {% block toolbar %}{% endblock %}
+  {% if running %}<span class="status-pill">Scan running…</span>{% endif %}
+  <form method="post" action="/scan" class="inline"><button class="secondary" title="Scan all systems now"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/></svg>Scan all</button></form>
+</div>
 <main>
 {% block content %}{% endblock %}
 </main>
-<footer style="text-align:center" class="muted"><small>diysca {{ version }} · data: OSV.dev, NVD, CISA KEV</small></footer>
+</div>
+<footer>diysca {{ version }} · vulnerability data: OSV.dev, NVD, CISA KEV{% if extra_source_names %}, {{ extra_source_names }}{% endif %}</footer>
+<script>
+document.getElementById("navbtn").addEventListener("click",function(){
+  var r=document.documentElement,w=r.dataset.nav==="wide";if(w)delete r.dataset.nav;else r.dataset.nav="wide";
+  try{localStorage.setItem("diysca-nav",w?"icons":"wide")}catch(e){}
+});
+document.getElementById("themebtn").addEventListener("click",function(){
+  var r=document.documentElement,n=r.dataset.theme==="light"?"dark":"light";r.dataset.theme=n;
+  try{localStorage.setItem("diysca-theme",n)}catch(e){}
+});
+</script>
 </body>
 </html>
-

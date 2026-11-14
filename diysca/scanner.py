@@ -82,16 +82,27 @@ def store_results(host_id: int, facts: HostFacts, ecosystem: str | None, repo_ve
                            severity=CASE WHEN excluded.severity='UNKNOWN' THEN findings.severity ELSE excluded.severity END,
                            cvss_score=COALESCE(excluded.cvss_score, findings.cvss_score),
                            status=CASE WHEN findings.status='ignored' THEN 'ignored' ELSE 'open' END,
-                           resolved_at=NULL, last_seen=excluded.last_seen""",
+                           resolved_at=NULL, resolved_version=NULL, resolution=NULL,
+                           last_seen=excluded.last_seen""",
                       (host_id, cd.package, cd.version, cd.package, cd.ecosystem, cd.location or None,
                        ",".join(cd.binaries), ",".join(cd.osv_ids), cd.summary[:500], cd.vuln_id,
                        cd.vuln_id if cd.vuln_id.startswith("CVE-") else None, cd.fixed_version, cd.repo_version,
                        int(cd.fix_in_repo), cd.severity, cd.cvss_score, now, now))
-        for row in c.execute("SELECT id, ecosystem, package, vuln_id FROM findings WHERE host_id=? AND status='open'",
+        # what is installed now, to tell "upgraded" from "removed"
+        installed: dict[tuple[str, str], str] = {}
+        for p in facts.packages:
+            installed.setdefault(("", p.source_name or p.name), p.source_version or p.version)
+            installed.setdefault(("", p.name), p.version)
+        for p in lang_pkgs:
+            installed[(p.ecosystem, p.name)] = p.version
+        for row in c.execute("SELECT id, ecosystem, package, version, vuln_id FROM findings WHERE host_id=? AND status='open'",
                              (host_id,)).fetchall():
             kind = "lang" if row["ecosystem"] else "os"
             if kind in evaluated and (row["ecosystem"], row["package"], row["vuln_id"]) not in seen:
-                c.execute("UPDATE findings SET status='resolved', resolved_at=? WHERE id=?", (now, row["id"]))
+                cur = installed.get((row["ecosystem"], row["package"]))
+                how = "removed" if cur is None else ("not-affected" if cur == row["version"] else "upgraded")
+                c.execute("UPDATE findings SET status='resolved', resolved_at=?, resolved_version=?, resolution=? WHERE id=?",
+                          (now, cur, how, row["id"]))
 
 
 async def scan_host(host_id: int, client: OSVClient | None = None, send_alerts: bool = True,
@@ -171,6 +182,8 @@ async def scan_all(client: OSVClient | None = None, host_ids: list[int] | None =
         if settings.inventories:
             import_inventories()
         await refresh_kev()
+        from . import sources
+        await sources.refresh_all()
         ids = host_ids or [r["id"] for r in db.q("SELECT id FROM hosts WHERE enabled=1")]
         sem = asyncio.Semaphore(settings.scan_concurrency)
         own = client is None

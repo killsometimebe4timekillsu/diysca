@@ -5,12 +5,15 @@
 <div class="card"><pre class="mono">{{ message }}</pre>
 <p><a href="https://osv.dev/vulnerability/{{ f.vuln_id }}" target="_blank">OSV</a>
 {% if f.vuln_id.startswith('CVE-') %} · <a href="https://nvd.nist.gov/vuln/detail/{{ f.vuln_id }}" target="_blank">NVD</a>{% endif %}
-· status {{ f.status }} · first seen {{ f.first_seen }} · last seen {{ f.last_seen }}</p>
+· status {{ f.status }} · first seen {{ f.first_seen }} · last seen {{ f.last_seen }}
+{% if f.status == 'resolved' %} · patched {{ f.resolved_at }} ({{ f.resolution or 'gone' }}{% if f.resolved_version %}, now {{ f.resolved_version }}{% endif %}){% endif %}
+{% if f.epss is not none %} · EPSS <b>{{ '%.1f'|format(f.epss * 100) }}%</b> chance of exploitation in the next 30 days{% endif %}</p>
 {% if nvd and nvd.description %}<p>{{ nvd.description }}</p><p class="muted mono">NVD: {{ nvd.score }} {{ nvd.vector }}</p>{% endif %}
 {% if kev %}<p><b>CISA KEV:</b> {{ kev.name }} · added {{ kev.date_added }} · due {{ kev.due_date }} · ransomware: {{ kev.ransomware }}</p>{% endif %}
 </div>
-<div class="card"><h2>Distro advisories</h2>
-{% for a in advisories %}<p><a href="https://osv.dev/vulnerability/{{ a.id }}" target="_blank"><b>{{ a.id }}</b></a> {{ m.sev(a.severity) }} {{ a.summary }}</p>
+<div class="card"><h2>Advisories</h2>
+{% for a in advisories %}{% set src = a.id.split('/')[0] if '/' in a.id else 'OSV' %}
+<p><span class="tag">{{ src }}</span> {% if src == 'OSV' %}<a href="https://osv.dev/vulnerability/{{ a.id }}" target="_blank"><b>{{ a.id }}</b></a>{% else %}<b>{{ a.id.split('/', 1)[1] }}</b>{% endif %} {{ m.sev(a.severity) }} {{ a.summary }}</p>
 <pre><small>{{ (a.details or '')[:1500] }}</small></pre>{% endfor %}</div>
 <div class="card"><h2>Also open on</h2><table>
 {% for o in others %}<tr><td><a href="/systems/{{ o.host_id }}">{{ o.host_name }}</a></td><td>{{ o.package }} {{ o.version }}</td><td>{{ 'fix in repo' if o.fix_in_repo else '' }}</td></tr>
