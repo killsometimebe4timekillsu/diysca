@@ -107,7 +107,7 @@ On a system, click **Reprovision playbook**, or upload an SBOM under **Patching 
 
 ### Settings import / export
 
-**Settings > Import / export** (or `diysca settings export|import`) moves CVE sources, alert channels, subscriptions and saved filters as one YAML file. Secrets are written as `***` unless you ask for them. Importing `***` keeps the stored value, so a masked export can be edited and re-imported. Use preview first; "replace" also removes items that are not in the file.
+**Settings > Import / Export** (or `diysca settings export|import`) moves CVE sources, alert channels, subscriptions and saved filters as one YAML file. Secrets are written as `***` unless you ask for them. Importing `***` keeps the stored value, so a masked export can be edited and re-imported. Use preview first; "replace" also removes items that are not in the file.
 
 ### CVE sources
 

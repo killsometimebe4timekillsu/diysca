@@ -58,7 +58,7 @@ def export_bundle(include_secrets: bool = False, parts=PARTS) -> dict:
 
 
 def export_yaml(include_secrets: bool = False, parts=PARTS) -> str:
-    head = "# diysca settings export. Import it on the Settings > Import / export page or with `diysca settings import`.\n"
+    head = "# diysca settings export. Import it on the Settings > Import / Export page or with `diysca settings import`.\n"
     if not include_secrets:
         head += "# Secrets are shown as ***. Importing *** keeps the value that is already stored.\n"
     return head + yaml.safe_dump(export_bundle(include_secrets, parts), sort_keys=False, allow_unicode=True, width=120)
