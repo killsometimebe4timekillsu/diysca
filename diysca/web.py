@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, db, notify, patch, patched, repomgr, scanner, settings_io, sources
+from . import __version__, db, mcp, mitigate, notify, patch, patched, repomgr, scanner, settings_io, sources
 from .config import settings
 from .feeds import SEVERITY_ORDER, sev_rank
 from .sbom import build_sbom, sbom_json
@@ -26,13 +26,46 @@ _basic = HTTPBasic(auto_error=False)
 _bg: set[asyncio.Task] = set()
 
 
+def _token_name(token: str) -> str | None:
+    for name, t in (settings.api_tokens or {}).items():
+        if t and secrets.compare_digest(str(t), token):
+            return name
+    return None
+
+
+def _machine_path(path: str) -> bool:
+    return path.startswith("/api/") or path == "/mcp"
+
+
 def auth(request: Request, creds: HTTPBasicCredentials | None = Depends(_basic)):
-    if not (settings.web_user and settings.web_password) or request.url.path == "/healthz":
+    """HTTP basic auth for people, bearer tokens (settings.api_tokens) for agents, CI/CD and MCP clients.
+
+    Tokens only open /api/* and /mcp. Without web_user/web_password the UI is open; once api_tokens are
+    configured, /api/* and /mcp need a token or the basic-auth login."""
+    path = request.url.path
+    request.state.actor = "web"
+    request.state.is_token = False
+    if path == "/healthz":
         return
-    if creds and secrets.compare_digest(creds.username, settings.web_user) and \
-            secrets.compare_digest(creds.password, settings.web_password):
-        return
-    raise HTTPException(401, headers={"WWW-Authenticate": "Basic"})
+    authz = request.headers.get("authorization", "")
+    if authz.lower().startswith("bearer "):
+        name = _token_name(authz[7:].strip())
+        if name and _machine_path(path):
+            request.state.actor, request.state.is_token = f"token:{name}", True
+            return
+        raise HTTPException(401, "invalid API token" if not name else "API tokens only work on /api/* and /mcp",
+                            headers={"WWW-Authenticate": "Bearer"})
+    basic_on = bool(settings.web_user and settings.web_password)
+    if basic_on or (settings.api_tokens and _machine_path(path)):
+        if basic_on and creds and secrets.compare_digest(creds.username, settings.web_user) and \
+                secrets.compare_digest(creds.password, settings.web_password):
+            request.state.actor = creds.username
+            return
+        raise HTTPException(401, headers={"WWW-Authenticate": "Basic" if basic_on else "Bearer"})
+
+
+def actor(request: Request) -> str:
+    return getattr(request.state, "actor", "web")
 
 
 @asynccontextmanager
@@ -45,7 +78,33 @@ async def lifespan(app):
     task.cancel()
 
 
-app = FastAPI(title="diysca", lifespan=lifespan, dependencies=[Depends(auth)])
+API_DESCRIPTION = """
+JSON API of diysca, the self-hosted CVE scanner and patcher. The full guide with examples is in
+[docs/api.md](https://github.com/killsometimebe4timekillsu/diysca/blob/main/docs/api.md).
+
+**Authentication.** People log in with HTTP basic auth (`web_user` / `web_password`). Agents, CI/CD jobs
+and MCP clients send `Authorization: Bearer <token>` with a token from `api_tokens`. Tokens only open
+`/api/*` and `/mcp`. Without basic auth and without tokens, everything is open (lab setups only).
+
+**Filters.** List endpoints take the same query parameters as the filters in the web UI.
+
+**Mitigations.** Approve findings (`POST /api/mitigations`), then whoever can reach the systems claims the
+mitigation, runs its playbook and reports `running`, `done` or `failed`. On `done` diysca rescans the systems.
+"""
+
+OPENAPI_TAGS = [
+    {"name": "inventory", "description": "Systems and installed packages."},
+    {"name": "findings", "description": "Vulnerable packages per system (open, ignored, resolved)."},
+    {"name": "mitigations", "description": "Approved findings handed to agents, CI/CD or people who can reach the systems."},
+    {"name": "patched", "description": "What was fixed, when and how."},
+    {"name": "sources", "description": "Vulnerability data sources."},
+    {"name": "scans", "description": "Start scans."},
+    {"name": "mcp", "description": "Model Context Protocol endpoint (JSON-RPC 2.0, streamable HTTP, JSON responses)."},
+    {"name": "health", "description": "Liveness probe without authentication."},
+]
+
+app = FastAPI(title="diysca", version=__version__, description=API_DESCRIPTION, openapi_tags=OPENAPI_TAGS,
+              lifespan=lifespan, dependencies=[Depends(auth)])
 
 
 def _bg_run(coro):
@@ -118,7 +177,12 @@ def finding_query(args: dict):
     elif eco:
         where.append("f.ecosystem=?")
         p.append(eco)
-    sql = f"""SELECT f.*, h.name AS host_name, h.groups AS host_groups FROM findings f JOIN hosts h ON h.id=f.host_id
+    if args.get("approval") == "approved":
+        where.append("mi.status IN ('approved','claimed','running')")
+    elif args.get("approval") == "unapproved":
+        where.append("(mi.id IS NULL OR mi.status NOT IN ('approved','claimed','running'))")
+    sql = f"""SELECT f.*, h.name AS host_name, h.groups AS host_groups, mi.status AS mitigation_status
+              FROM findings f JOIN hosts h ON h.id=f.host_id LEFT JOIN mitigations mi ON mi.id=f.mitigation_id
               WHERE {' AND '.join(where)}
               ORDER BY f.kev DESC, CASE f.severity WHEN 'CRITICAL' THEN 5 WHEN 'HIGH' THEN 4 WHEN 'MEDIUM' THEN 3
                        WHEN 'LOW' THEN 2 ELSE 1 END DESC, f.cvss_score DESC, h.name, f.package LIMIT 5000"""
@@ -235,7 +299,7 @@ def findings(request: Request):
     args.setdefault("status", "open")
     sql, p = finding_query(args)
     return render(request, "findings.html", rows=db.q(sql, p), args=args, groups=all_groups(),
-                  severities=SEVERITY_ORDER[2:])
+                  severities=SEVERITY_ORDER[2:], handoffs=mitigate.handoffs())
 
 
 @app.get("/findings/{fid}")
@@ -251,7 +315,9 @@ def finding_detail(request: Request, fid: int):
     sent = db.q("""SELECT n.*, c.name channel FROM notifications n JOIN channels c ON c.id=n.channel_id
                    WHERE n.finding_id=?""", (fid,))
     return render(request, "finding.html", f=f, advisories=[a for a in advisories if a], nvd=nvd, kev=kev,
-                  others=others, sent=sent, message=notify.format_finding(f, {"name": f["host_name"]}))
+                  others=others, sent=sent, message=notify.format_finding(f, {"name": f["host_name"]}),
+                  hint=notify.action_hint(f), handoffs=mitigate.handoffs(),
+                  mitigation=mitigate.get(f["mitigation_id"], with_playbook=False) if f["mitigation_id"] else None)
 
 
 @app.post("/findings/{fid}/status")
@@ -638,52 +704,180 @@ async def repo_run(request: Request, name: str):
     return render(request, "patching.html", **{**_patching_ctx(), "result": res})
 
 
+
+
+# ------------------------------------------------------------- mitigations (UI)
+def _form_ids(form) -> list[int]:
+    ids = [int(i) for i in form.getlist("ids") if str(i).isdigit()]
+    if not ids and form.get("filter") is not None:
+        ids = _ids_from_filter(str(form.get("filter")))
+    if not ids and form.get("finding_id"):
+        ids = [int(form.get("finding_id"))]
+    return ids
+
+
+@app.get("/mitigations")
+def mitigations_view(request: Request, status: str = "open"):
+    return render(request, "mitigations.html", rows=mitigate.list_(status), status=status,
+                  statuses=("open",) + mitigate.STATUSES + ("all",), handoffs=mitigate.handoffs())
+
+
+@app.post("/mitigations")
+async def mitigation_create(request: Request):
+    form = await request.form()
+    try:
+        m = await asyncio.to_thread(mitigate.approve, _form_ids(form), actor(request), str(form.get("note") or ""),
+                                    str(form.get("handoff") or "") or None, bool(form.get("rescan", "1") == "1"))
+    except mitigate.MitigationError as e:
+        return RedirectResponse(f"/mitigations?{urlencode({'error': str(e)})}", 303)
+    return RedirectResponse(f"/mitigations/{m['id']}", 303)
+
+
+@app.get("/mitigations/{mid}")
+def mitigation_view(request: Request, mid: int):
+    m = mitigate.get(mid)
+    if not m:
+        raise HTTPException(404)
+    return render(request, "mitigation.html", mi=m, handoffs=mitigate.handoffs(), msg=request.query_params.get("msg"))
+
+
+@app.get("/mitigations/{mid}/playbook.yml", include_in_schema=False)
+def mitigation_playbook_ui(mid: int):
+    return api_mitigation_playbook(mid)
+
+
+@app.post("/mitigations/{mid}/cancel")
+def mitigation_cancel_ui(request: Request, mid: int, reason: str = Form("")):
+    try:
+        mitigate.cancel(mid, actor(request), reason)
+    except mitigate.MitigationError as e:
+        return RedirectResponse(f"/mitigations/{mid}?{urlencode({'msg': str(e)})}", 303)
+    return RedirectResponse(f"/mitigations/{mid}", 303)
+
+
+@app.post("/mitigations/{mid}/report")
+async def mitigation_report_ui(request: Request, mid: int, status: str = Form(...), log: str = Form("")):
+    try:
+        _, rescan = await asyncio.to_thread(mitigate.report, mid, status, actor(request), log)
+    except mitigate.MitigationError as e:
+        return RedirectResponse(f"/mitigations/{mid}?{urlencode({'msg': str(e)})}", 303)
+    if rescan:
+        _bg_run(scanner.scan_all(host_ids=rescan))
+    return RedirectResponse(f"/mitigations/{mid}", 303)
+
+
+@app.post("/mitigations/{mid}/handoff")
+async def mitigation_handoff_ui(mid: int, target: str = Form(...)):
+    ok, res = await asyncio.to_thread(mitigate.deliver, mid, target)
+    return RedirectResponse(f"/mitigations/{mid}?{urlencode({'msg': ('Sent: ' if ok else 'Failed: ') + res})}", 303)
+
+
+@app.get("/settings/handoff")
+def handoff_view(request: Request):
+    return render(request, "settings_handoff.html", tab="handoff", targets=mitigate.handoffs(), types=mitigate.HANDOFF_TYPES,
+                  tokens=sorted(settings.api_tokens or {}), msg=request.query_params.get("msg"))
+
+
+@app.post("/settings/handoff")
+async def handoff_save(request: Request):
+    form = await request.form()
+    cfg = {}
+    if form.get("ref"):
+        cfg["ref"] = str(form.get("ref"))
+    if form.get("event_type"):
+        cfg["event_type"] = str(form.get("event_type"))
+    try:
+        mitigate.save_handoff(str(form.get("name") or ""), str(form.get("type") or ""), str(form.get("url") or ""),
+                              str(form.get("token")) if form.get("token") else None, cfg,
+                              enabled=True, auto=form.get("auto") == "1")
+    except mitigate.MitigationError as e:
+        return RedirectResponse(f"/settings/handoff?{urlencode({'msg': str(e)})}", 303)
+    return RedirectResponse("/settings/handoff?msg=saved", 303)
+
+
+@app.post("/settings/handoff/{name}/delete")
+def handoff_delete(name: str):
+    mitigate.remove_handoff(name)
+    return RedirectResponse("/settings/handoff", 303)
+
+
 # ------------------------------------------------------------------ API
 def rows(r):
     return [dict(x) for x in r]
 
 
-@app.get("/api/hosts")
+@app.get("/api/hosts", tags=["inventory"], summary="List systems")
 def api_hosts(request: Request):
+    """Systems (hosts and containers) with open-finding counts.
+
+    Query parameters: `host` (name or address, `*` wildcards), `group`, `os`, `kind` (`host` / `container`)."""
     sql, p = hosts_query(dict(request.query_params))
     return rows(db.q(sql, p))
 
 
-@app.get("/api/packages")
+@app.get("/api/packages", tags=["inventory"], summary="List installed packages")
 def api_packages(request: Request):
+    """Installed packages across systems.
+
+    Query parameters: `name`, `version`, `host`, `group`, `os`, `eco` (`os`, `lang` or an ecosystem such as
+    `PyPI`), `vulnerable=1`, `upgradable=1` (the repos offer a newer version)."""
     sql, p = package_query(dict(request.query_params))
     return rows(db.q(sql, p))
 
 
-@app.get("/api/findings")
+@app.get("/api/findings", tags=["findings"], summary="List findings")
 def api_findings(request: Request):
+    """Vulnerable packages, worst first (KEV, severity, CVSS). At most 5000 rows.
+
+    Query parameters: `status` (`open` default, `ignored`, `resolved`, `all`), `host`, `group`, `os`, `package`,
+    `cve`, `severity` (minimum: `CRITICAL`, `HIGH`, `MEDIUM`, `LOW`), `fix` (`repo` = fix in your repos,
+    `upstream` = released but not in your repos, `none`), `kev=1`, `eco`, `approval` (`approved` = in an open
+    mitigation, `unapproved`)."""
     args = dict(request.query_params)
     args.setdefault("status", "open")
     sql, p = finding_query(args)
     return rows(db.q(sql, p))
 
 
-@app.get("/api/patched")
+@app.get("/api/findings/{fid}", tags=["findings"], summary="Get one finding")
+def api_finding(fid: int):
+    """One finding with its system, the advisories that report it and the mitigation it is approved in."""
+    f = db.q1("""SELECT f.*, h.name host_name FROM findings f JOIN hosts h ON h.id=f.host_id WHERE f.id=?""", (fid,))
+    if not f:
+        raise HTTPException(404)
+    out = dict(f)
+    out["mitigation"] = mitigate.get(f["mitigation_id"], with_playbook=False) if f["mitigation_id"] else None
+    return out
+
+
+@app.get("/api/patched", tags=["patched"], summary="Patched findings in a time range")
 def api_patched(request: Request):
+    """Findings that went away in a time range, with how (`upgraded`, `removed`, `not-affected`).
+
+    Query parameters: `range` (`last` = each system's latest patching, `24h`, `7d`, `30d`, `90d`, `1y`, `custom`),
+    `from` / `to` (dates, with `range=custom`), `host`, `group`, `severity`, `eco`, `how`."""
     d = patched.query(dict(request.query_params))
     return {"range": d["range"], "start": d["start"], "end": d["end"], "stats": d["stats"], "findings": rows(d["rows"])}
 
 
-@app.get("/api/sources")
+@app.get("/api/sources", tags=["sources"], summary="List vulnerability sources")
 def api_sources():
+    """Extra vulnerability sources with their state. Header values are masked."""
     return [sources.public(s) for s in sources.all_sources()]
 
 
-@app.get("/api/hosts/{host_id}/sbom")
+@app.get("/api/hosts/{host_id}/sbom", tags=["inventory"], summary="CycloneDX SBOM of a system")
 def api_sbom(host_id: int):
+    """CycloneDX 1.5 JSON with OS packages, language packages, container images, repos and OS facts."""
     try:
         return JSONResponse(build_sbom(host_id))
     except KeyError:
         raise HTTPException(404)
 
 
-@app.post("/api/scan")
+@app.post("/api/scan", tags=["scans"], summary="Scan one or all systems")
 async def api_scan(host: str | None = None):
+    """Scans now and waits for the result. `host` = system name; without it, every enabled system is scanned."""
     if host:
         h = db.q1("SELECT id FROM hosts WHERE name=?", (host,))
         if not h:
@@ -692,6 +886,125 @@ async def api_scan(host: str | None = None):
     return await scanner.scan_all()
 
 
-@app.get("/healthz")
+# ------------------------------------------------------------------ API: mitigations
+@app.get("/api/mitigations", tags=["mitigations"], summary="List mitigations")
+def api_mitigations(status: str = "open"):
+    """`status`: `open` (approved, claimed or running; default), `approved` (waiting for someone to claim it),
+    `claimed`, `running`, `done`, `failed`, `cancelled` or `all`. The playbook is left out; fetch it per mitigation."""
+    return mitigate.list_(status)
+
+
+@app.post("/api/mitigations", tags=["mitigations"], summary="Approve findings for mitigation", status_code=201)
+async def api_mitigation_create(request: Request):
+    """Body (JSON): `finding_ids` (list) or `filter` (a findings query string, e.g. `host=web1&fix=repo`),
+    optional `note`, `handoff` (target name; without it, targets marked *auto* are used) and `rescan` (default
+    true). Only open findings are taken. Token holders may approve only when `agents_can_approve` is set."""
+    if request.state.is_token and not settings.agents_can_approve:
+        raise HTTPException(403, "approving needs a person (or agents_can_approve: true)")
+    body = await request.json()
+    ids = [int(i) for i in body.get("finding_ids") or []]
+    if not ids and body.get("filter") is not None:
+        ids = _ids_from_filter(str(body["filter"]))
+    try:
+        return await asyncio.to_thread(mitigate.approve, ids, actor(request), str(body.get("note") or ""),
+                                       body.get("handoff") or None, bool(body.get("rescan", True)))
+    except mitigate.MitigationError as e:
+        raise HTTPException(422, str(e))
+
+
+@app.get("/api/mitigations/{mid}", tags=["mitigations"], summary="Get a mitigation")
+def api_mitigation(mid: int):
+    """The mitigation with its findings, the playbook (YAML text), log and links."""
+    m = mitigate.get(mid)
+    if not m:
+        raise HTTPException(404)
+    return m
+
+
+@app.get("/api/mitigations/{mid}/playbook.yml", tags=["mitigations"], summary="Playbook of a mitigation")
+def api_mitigation_playbook(mid: int):
+    """The Ansible playbook created at approval time, pinned to the versions your repos offered then.
+    Items a playbook can't fix (language packages, images, fixes not yet in your repos) are comments at the top."""
+    m = db.q1("SELECT playbook FROM mitigations WHERE id=?", (mid,))
+    if not m:
+        raise HTTPException(404)
+    return Response(m["playbook"] or "", media_type="application/x-yaml",
+                    headers={"Content-Disposition": f'attachment; filename="diysca-mitigation-{mid}.yml"'})
+
+
+@app.post("/api/mitigations/{mid}/claim", tags=["mitigations"], summary="Claim a mitigation")
+def api_mitigation_claim(request: Request, mid: int):
+    """Marks an `approved` mitigation as yours, so no other agent runs it. 409 if it isn't `approved` any more."""
+    try:
+        return mitigate.claim(mid, actor(request))
+    except KeyError:
+        raise HTTPException(404)
+    except mitigate.MitigationError as e:
+        raise HTTPException(409, str(e))
+
+
+@app.post("/api/mitigations/{mid}/report", tags=["mitigations"], summary="Report progress")
+async def api_mitigation_report(request: Request, mid: int):
+    """Body (JSON): `status` (`running`, `done` or `failed`) and optional `log` (text, e.g. the ansible output).
+    On `done` the affected systems are rescanned in the background (unless the mitigation was created with
+    `rescan: false`), and the channels that alerted about the findings are told."""
+    body = await request.json()
+    try:
+        m, rescan = await asyncio.to_thread(mitigate.report, mid, str(body.get("status") or ""), actor(request),
+                                            str(body.get("log") or ""))
+    except KeyError:
+        raise HTTPException(404)
+    except mitigate.MitigationError as e:
+        raise HTTPException(409, str(e))
+    if rescan:
+        _bg_run(scanner.scan_all(host_ids=rescan))
+    return {**m, "rescan_hosts": rescan}
+
+
+@app.post("/api/mitigations/{mid}/cancel", tags=["mitigations"], summary="Cancel a mitigation")
+async def api_mitigation_cancel(request: Request, mid: int):
+    """Optional body (JSON): `reason`. The findings can be approved again afterwards."""
+    if request.state.is_token and not settings.agents_can_approve:
+        raise HTTPException(403, "cancelling needs a person (or agents_can_approve: true)")
+    try:
+        body = await request.json()
+    except ValueError:
+        body = {}
+    try:
+        return mitigate.cancel(mid, actor(request), str((body or {}).get("reason") or ""))
+    except KeyError:
+        raise HTTPException(404)
+    except mitigate.MitigationError as e:
+        raise HTTPException(409, str(e))
+
+
+# ------------------------------------------------------------------ MCP
+@app.post("/mcp", tags=["mcp"], summary="MCP endpoint")
+async def mcp_endpoint(request: Request):
+    """Model Context Protocol over streamable HTTP (JSON responses, no server-initiated messages).
+    Point an MCP client at `<base_url>/mcp` with `Authorization: Bearer <token>`. See docs/mcp.md."""
+    try:
+        msg = await request.json()
+    except ValueError:
+        return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}, 400)
+    ctx = mcp.Context(actor=actor(request), is_token=request.state.is_token)
+    out = await mcp.handle(msg, ctx)
+    if out is None:
+        return Response(status_code=202)
+    return JSONResponse(out)
+
+
+@app.get("/mcp", include_in_schema=False)
+def mcp_get():
+    return Response(status_code=405, headers={"Allow": "POST"})
+
+
+@app.get("/healthz", tags=["health"], summary="Health check")
 def healthz():
+    """Always open, also with auth enabled. Use it for container and orchestrator probes."""
     return {"ok": True, "version": __version__}
+
+
+for _r in app.routes:  # the OpenAPI document covers the machine API, not the HTML pages
+    if getattr(_r, "path", "").startswith(("/api/", "/mcp", "/healthz")) is False and hasattr(_r, "include_in_schema"):
+        _r.include_in_schema = False

@@ -18,7 +18,7 @@
 
 {% macro settings_tabs(tab) %}
 <nav class="tabs" aria-label="Settings">
-{% for key, href, label in [('general','/settings','General'),('sources','/settings/sources','CVE Sources'),('notifications','/settings/notifications','Notifications'),('repos','/settings/repos','Repo Manager'),('backup','/settings/backup','Import / Export')] %}
+{% for key, href, label in [('general','/settings','General'),('sources','/settings/sources','CVE Sources'),('notifications','/settings/notifications','Notifications'),('repos','/settings/repos','Repo Manager'),('handoff','/settings/handoff','Hand-off'),('backup','/settings/backup','Import / Export')] %}
 <a href="{{ href }}" class="{{ 'on' if tab == key }}">{{ label }}</a>{% endfor %}
 </nav>
 {% endmacro %}
@@ -26,8 +26,8 @@
 {% macro view_tabs(page) %}
 {% set groups = {
   'findings': ('Findings', [('findings','/findings','Findings'),('packages','/packages','Packages')]),
-  'patching': ('Patching', [('patching','/patching','Patch'),('patched','/patched','Patched CVEs')]) } %}
-{% set g = 'findings' if page in ('findings','packages') else 'patching' %}
+  'patching': ('Patching', [('patching','/patching','Patch'),('mitigations','/mitigations','Mitigations'),('patched','/patched','Patched CVEs')]) } %}
+{% set g = 'findings' if page in ('findings','packages') else 'patching' %}{% set page = 'mitigations' if page == 'mitigation' else page %}
 <nav class="tabs" aria-label="{{ groups[g][0] }}">
 {% for key, href, label in groups[g][1] %}<a href="{{ href }}" class="{{ 'on' if page == key }}">{{ label }}</a>{% endfor %}
 </nav>

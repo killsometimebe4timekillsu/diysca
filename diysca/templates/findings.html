@@ -13,6 +13,7 @@
     <option value="repo" {{ 'selected' if args.fix=='repo' }}>available in my repos</option>
     <option value="upstream" {{ 'selected' if args.fix=='upstream' }}>released, not in my repos</option>
     <option value="none" {{ 'selected' if args.fix=='none' }}>no fix yet</option></select></label>
+  <label>Approval<select name="approval"><option value="">any</option><option value="approved" {{ 'selected' if args.approval=='approved' }}>approved, in progress</option><option value="unapproved" {{ 'selected' if args.approval=='unapproved' }}>not approved</option></select></label>
   <label>Status<select name="status">{% for s in ['open','ignored','resolved','all'] %}<option {{ 'selected' if args.status==s }}>{{ s }}</option>{% endfor %}</select></label>
   <label>Type<select name="eco"><option value="">all</option><option value="os" {{ 'selected' if args.eco=='os' }}>OS packages</option><option value="lang" {{ 'selected' if args.eco=='lang' }}>language packages</option>
     {% for e in ['PyPI','npm','Maven','RubyGems','Go','crates.io','Packagist'] %}<option {{ 'selected' if args.eco==e }}>{{ e }}</option>{% endfor %}</select></label>
@@ -25,6 +26,16 @@
 <div class="card"><p class="muted">{{ rows|length }} findings · <a href="/api/findings?{{ query_string }}">JSON</a></p>
 <form id="patchform" method="post" action="/patch/playbook" class="inline"><button>Patch playbook for selected</button></form>
 <form method="post" action="/patch/playbook" class="inline"><input type="hidden" name="filter" value="{{ query_string }}"><button class="secondary">Patch playbook for everything in this filter</button></form>
+<details class="approve"><summary class="btnlike">Approve for mitigation…</summary>
+<div class="filters" style="margin-top:8px">
+  <label>Note<input name="note" form="patchform" size="40" placeholder="e.g. change CHG-1234, maintenance window Sat 22:00"></label>
+  <label>Hand off to<select name="handoff" form="patchform"><option value="">{{ 'auto targets / agents pull it' if handoffs else 'agents pull it (API / MCP)' }}</option>{% for h in handoffs %}<option>{{ h.name }}</option>{% endfor %}</select></label>
+  <label><span><input type="checkbox" name="rescan" value="1" form="patchform" checked> rescan when done</span></label>
+  <button form="patchform" formaction="/mitigations">Approve selected</button>
+  <form method="post" action="/mitigations" class="inline"><input type="hidden" name="filter" value="{{ query_string }}"><button class="secondary">Approve everything in this filter</button></form>
+</div>
+<p class="muted"><small>Approving hands the findings and a ready playbook to whoever can reach the systems: an agent or CI/CD job (pull via the API or MCP, or pushed to a <a href="/settings/handoff">hand-off target</a>), or a colleague. They report back, and the systems are rescanned when it's done.</small></p>
+</details>
 <table><tr><th><input type="checkbox" onclick="document.querySelectorAll('input[form=patchform]').forEach(c=>c.checked=this.checked)"></th><th>Severity</th><th>CVE</th><th>System</th><th>Package</th><th>Installed</th><th>Fixed in</th><th>Your repos offer</th><th>Status</th><th></th></tr>
 {% for f in rows %}<tr>
 <td><input type="checkbox" name="ids" value="{{ f.id }}" form="patchform"></td>
@@ -34,7 +45,7 @@
 <td>{% if f.ecosystem %}<span class="tag">{{ f.ecosystem }}</span> {% endif %}{{ f.package }}<br><small class="muted">{{ f.binaries.replace(',', ', ') if f.binaries }}{{ f.location or '' }}</small></td>
 <td class="mono">{{ f.version }}</td><td class="mono">{{ f.fixed_version or '–' }}</td>
 {% if f.ecosystem %}<td class="muted">n/a</td>{% else %}<td class="mono {{ 'ok' if f.fix_in_repo else ('bad' if f.fixed_version) }}">{{ f.repo_version or '–' }}{{ ' ✔' if f.fix_in_repo }}</td>{% endif %}
-<td>{{ f.status }}</td>
+<td>{{ f.status }}{% if f.mitigation_status in ('approved','claimed','running') %} <a class="tag" href="/mitigations/{{ f.mitigation_id }}" title="approved for mitigation">#{{ f.mitigation_id }} {{ f.mitigation_status }}</a>{% endif %}</td>
 <td><form method="post" action="/findings/{{ f.id }}/status" class="inline"><input type="hidden" name="back" value="/findings?{{ query_string }}">
 {% if f.status == 'ignored' %}<input type="hidden" name="status" value="open"><button class="secondary">Unignore</button>
 {% elif f.status == 'open' %}<input type="hidden" name="status" value="ignored"><button class="secondary">Ignore</button>{% endif %}</form></td>

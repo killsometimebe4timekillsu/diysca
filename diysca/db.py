@@ -88,10 +88,28 @@ CREATE TABLE IF NOT EXISTS findings (
   resolved_version TEXT,             -- installed version when the finding went away
   resolution TEXT,                   -- upgraded | removed | not-affected
   epss REAL,                         -- EPSS probability (0..1), when an epss source is configured
+  mitigation_id BIGINT,              -- latest mitigation the finding was approved in
   UNIQUE(host_id, ecosystem, package, vuln_id)
 );
 CREATE INDEX IF NOT EXISTS ix_find_status ON findings(status);
 CREATE INDEX IF NOT EXISTS ix_find_resolved ON findings(resolved_at);
+CREATE TABLE IF NOT EXISTS mitigations (  -- approved findings handed to someone (agent, CI/CD, person) to fix
+  id INTEGER PRIMARY KEY, created_at TEXT NOT NULL, approved_by TEXT, note TEXT,
+  status TEXT NOT NULL DEFAULT 'approved',  -- approved | claimed | running | done | failed | cancelled
+  handoff TEXT,                      -- hand-off target name, NULL = pull (agents fetch it via API / MCP)
+  handoff_result TEXT,               -- delivery result of the hand-off
+  claimed_by TEXT, claimed_at TEXT, updated_at TEXT,
+  playbook TEXT, summary TEXT, log TEXT, rescan INTEGER DEFAULT 1
+);
+CREATE TABLE IF NOT EXISTS mitigation_findings (
+  mitigation_id BIGINT NOT NULL REFERENCES mitigations(id) ON DELETE CASCADE,
+  finding_id BIGINT NOT NULL REFERENCES findings(id) ON DELETE CASCADE,
+  PRIMARY KEY(mitigation_id, finding_id)
+);
+CREATE TABLE IF NOT EXISTS handoffs (     -- where approved mitigations are sent: webhook, github, gitlab
+  name TEXT PRIMARY KEY, type TEXT NOT NULL, url TEXT NOT NULL, token TEXT, config TEXT,
+  enabled INTEGER DEFAULT 1, auto INTEGER DEFAULT 0
+);
 CREATE TABLE IF NOT EXISTS patch_runs (    -- annotations: playbooks generated, repos updated
   id INTEGER PRIMARY KEY, at TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT
 );
@@ -136,13 +154,14 @@ CREATE TABLE IF NOT EXISTS events (
 );
 """
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # columns added after a release: (table, column, type). Applied on SQLite and PostgreSQL.
 ADDED_COLUMNS = [
     ("findings", "resolved_version", "TEXT"),
     ("findings", "resolution", "TEXT"),
     ("findings", "epss", "REAL"),
+    ("findings", "mitigation_id", "BIGINT"),  # latest mitigation the finding was approved in
 ]
 
 
@@ -334,7 +353,7 @@ def x(sql: str, params=()) -> int | None:
         return None
 
 
-_ID_TABLES = {"hosts", "packages", "repos", "findings", "channels", "subscriptions", "saved_filters", "events", "patch_runs"}
+_ID_TABLES = {"hosts", "packages", "repos", "findings", "channels", "subscriptions", "saved_filters", "events", "patch_runs", "mitigations"}
 
 
 def _has_id(sql: str) -> bool:

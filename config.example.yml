@@ -121,3 +121,13 @@ repo_managers: []
 #    content_view: CV-Rocky9                  # then a new version is published
 #    composite_content_view: CCV-Rocky9       # optional
 #    promote_to: [Test, Prod]                 # lifecycle stages offered in the UI
+
+# --- API tokens, approvals, hand-off (docs/api.md, docs/mitigations.md) ---
+# Agents, CI/CD jobs and MCP clients send "Authorization: Bearer <token>". Tokens open /api/* and /mcp only.
+# Generate with: openssl rand -hex 32
+# api_tokens:
+#   ci: "replace-with-a-long-random-string"
+#   agent-dmz: "another-long-random-string"
+# Let token holders approve and cancel mitigations themselves (default: only people can approve)
+# agents_can_approve: false
+# Hand-off targets (webhook, github, gitlab) are managed under Settings > Hand-off or imported as YAML.

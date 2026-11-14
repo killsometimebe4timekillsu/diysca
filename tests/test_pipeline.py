@@ -110,8 +110,10 @@ def test_alert_sent_once(scanned):
     _, sent = scanned
     assert len(sent) == 1
     url, title, body = sent[0]
-    assert "postgresql-16 16.6-1~deb12u1 installed on system_a affected by CVE-2025-1094" in body
-    assert "fix available in your repos" in body
+    assert "CVE-2025-1094  postgresql-16 16.6-1~deb12u1" in body
+    assert "is in your repos: patch it, or approve it for mitigation" in body
+    assert "/findings/" in body and "Approve for mitigation:" in body
+    assert "CVE-2025-1094" in title and "system_a" in title
     assert asyncio.run(notify.dispatch()) == 0  # dedup
 
 

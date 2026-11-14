@@ -1,0 +1,29 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+{{ m.settings_tabs(tab) }}
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<div class="card"><h2>Hand-off targets</h2>
+<p class="muted">Where approved mitigations are sent when diysca can't reach the systems itself. Agents can also pull them through the API or MCP without any target.</p>
+<table><tr><th>Name</th><th>Type</th><th>URL</th><th>Token</th><th>Auto</th><th></th></tr>
+{% for t in targets %}<tr><td>{{ t.name }}</td><td><span class="tag">{{ t.type }}</span></td><td class="mono">{{ t.url }}</td><td>{{ t.token or '–' }}</td>
+<td>{{ 'every approval' if t.auto else 'when chosen' }}</td>
+<td><form method="post" action="/settings/handoff/{{ t.name }}/delete" class="inline"><button class="danger">Delete</button></form></td></tr>
+{% else %}<tr><td colspan="6" class="muted">No targets. Approved mitigations wait for an agent to pull them.</td></tr>{% endfor %}</table>
+<form method="post" action="/settings/handoff" class="filters" style="margin-top:10px">
+  <label>Name<input name="name" required placeholder="gh-actions"></label>
+  <label>Type<select name="type">{% for k in types %}<option>{{ k }}</option>{% endfor %}</select></label>
+  <label>URL<input name="url" required size="40" placeholder="https://github.com/acme/infra"></label>
+  <label>Token<input name="token" type="password" placeholder="bearer / trigger token"></label>
+  <label>Git ref (GitLab)<input name="ref" size="8" placeholder="main"></label>
+  <label><span><input type="checkbox" name="auto" value="1"> send every approval</span></label>
+  <button>Save target</button></form>
+<table style="margin-top:10px">{% for k, v in types.items() %}<tr><td><span class="tag">{{ k }}</span></td><td class="muted">{{ v }}</td></tr>{% endfor %}
+<tr><td></td><td class="muted"><small>github: give the repo URL (<span class="mono">https://github.com/owner/repo</span>) and a token that may create repository dispatches. gitlab: the pipeline trigger URL (<span class="mono">https://gitlab.example/api/v4/projects/42/trigger/pipeline</span>) and a trigger token. webhook: any URL; the token is sent as a bearer token.</small></td></tr></table>
+</div>
+<div class="card"><h2>API tokens</h2>
+<p class="muted">Agents, CI/CD jobs and MCP clients send <span class="mono">Authorization: Bearer &lt;token&gt;</span>. Tokens are set in config.yml (<span class="mono">api_tokens: {name: token}</span>) or <span class="mono">DIYSCA_API_TOKENS=name:token,…</span>, never in the database.</p>
+<p>{% for t in tokens %}<span class="tag">{{ t }}</span> {% else %}<span class="muted">No tokens configured.</span>{% endfor %}</p>
+<p class="muted"><small>Agents may approve findings themselves only with <span class="mono">agents_can_approve: true</span>. MCP: <span class="mono">{{ request.base_url }}mcp</span> (HTTP) or <span class="mono">diysca mcp</span> (stdio).</small></p>
+</div>
+{% endblock %}

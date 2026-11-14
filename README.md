@@ -13,11 +13,14 @@ diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent
   * diysca generates an **Ansible playbook** for the selected findings. It pins every affected package to the exact version your repos offer, and includes an optional reboot.
   * If a fix is released upstream but your mirror doesn't have it yet, diysca can update the **self-hosted repo**: aptly (mirror update → snapshot → publish switch), Pulp 3 (sync → publication → distribution) or Foreman/Katello (sync → publish the content view → promote it to your lifecycle stages). It does a dry run first.
 * **SBOM:** one CycloneDX 1.5 JSON file per system, including a `vulnerabilities` section.
-* **Alerts:** sent via [Apprise](https://github.com/caronc/apprise/wiki), which covers ntfy, Gotify, e-mail, Telegram, Slack, Matrix, Discord, Teams, webhooks and more. Subscriptions decide *which packages on which systems at which severity* go to *which channel*. Each finding is sent only once.
+* **Alerts** ([docs/alerts.md](docs/alerts.md)): sent via [Apprise](https://github.com/caronc/apprise/wiki), which covers ntfy, Gotify, e-mail, Telegram, Slack, Matrix, Discord, Teams, webhooks and more. Subscriptions decide *which packages on which systems at which severity* go to *which channel*. Each finding is sent only once.
 * **Ansible inventories:** INI and YAML, groups, `:children`, `:vars`, `group_vars/`, `host_vars/` and host ranges. If `ansible-inventory` is installed, it is used instead, so dynamic and vaulted inventories also work.
 * **Patched CVEs:** what was patched, where, when and how (upgraded or removed), with a Grafana-style time picker: since the last patching of each system, the last 24 hours, 7, 30 or 90 days, a year, or a custom range. Playbook runs and repo updates show up as annotations on the chart.
 * **Reprovision from the SBOM:** every system's SBOM records its repositories, OS packages, pip/gem packages and container images. diysca turns it (or any CycloneDX SBOM with package URLs, e.g. from Syft or Trivy) into an Ansible playbook that rebuilds the system on a fresh install of the same OS release, at the recorded versions or with fixable vulnerabilities fixed.
-* **Web UI:** a classic Grafana-style dark UI (light theme on request). Click the logo to show the menu with or without names. Pages: dashboard, systems, **Findings** (tabs Findings and Packages), **Patching** (tabs Patch and Patched CVEs), and one **Settings** area (General, CVE Sources, Notifications, Repo Manager, Import / Export). Findings can be filtered by system, group, OS, host or container, package, ecosystem, CVE, severity, fix availability and KEV. Filters can be saved, and you can manage channels and subscriptions from the UI.
+* **Approve for mitigation:** when diysca can't reach a system, approve its findings instead. Agents, CI/CD pipelines (GitHub Actions, GitLab CI, any webhook) or colleagues who can reach it claim the mitigation, run its playbook and report back; diysca then rescans. See [docs/mitigations.md](docs/mitigations.md).
+* **MCP server:** AI agents and MCP clients use diysca through `diysca mcp` (stdio) or `<base_url>/mcp` (HTTP). See [docs/mcp.md](docs/mcp.md).
+* **API:** everything in the UI is available as JSON, with bearer tokens for automation. See [docs/api.md](docs/api.md) and `<base_url>/docs`.
+* **Web UI:** a classic Grafana-style dark UI (light theme on request). Click the logo to show the menu with or without names. Pages: dashboard, systems, **Findings** (tabs Findings and Packages), **Patching** (tabs Patch, Mitigations and Patched CVEs), and one **Settings** area (General, CVE Sources, Notifications, Repo Manager, Hand-off, Import / Export). Findings can be filtered by system, group, OS, host or container, package, ecosystem, CVE, severity, fix availability and KEV. Filters can be saved, and you can manage channels and subscriptions from the UI.
 * **Database:** PostgreSQL. SQLite remains available for single-user desktop installs, i.e. the AppImage and Flatpak.
 
 ![patched CVEs](docs/patched.png)
@@ -144,6 +147,10 @@ diysca settings export > settings.yml   # sources, channels, subscriptions, save
 diysca settings import settings.yml --dry-run
 diysca reprovision system_a -o rebuild.yml
 diysca patched --range 7d               # what got patched in the last week
+diysca mitigations approve --filter 'host=db1&fix=repo' --note CHG-1234
+diysca mitigations                      # open mitigations
+diysca mitigations report 12 --status done --log @run.log
+diysca mcp                              # MCP server on stdio
 diysca serve                            # UI + scheduler on :8080
 ```
 
@@ -192,7 +199,21 @@ Supported distros: Debian, Ubuntu, Alpine, Rocky, AlmaLinux, RHEL (including 10)
 
 ## API
 
-`GET /api/hosts`, `/api/packages`, `/api/findings` take the same query parameters as the UI filters (`host`, `group`, `os`, `package`, `severity`, `fix=repo|upstream|none`, `kev=1`, `status`). There is also `GET /api/hosts/{id}/sbom`, `GET /api/patched?range=last|24h|7d|30d|90d|1y|custom&from=&to=`, `GET /api/sources` and `POST /api/scan[?host=name]`.
+Everything in the UI is available as JSON: systems, packages, findings, SBOMs, patched CVEs, sources, scans and
+mitigations. Agents and CI/CD use bearer tokens (`api_tokens` in config.yml). Full reference with examples:
+[docs/api.md](docs/api.md); interactive OpenAPI docs at `<base_url>/docs`.
+
+```sh
+curl -s -H "Authorization: Bearer $TOKEN" "https://diysca.example.org/api/findings?group=prod&severity=CRITICAL&fix=repo"
+```
+
+### Approve for mitigation, hand-off and MCP
+
+Approve findings on the Findings page (or `POST /api/mitigations`). Agents and pipelines that can reach the systems
+pull them (`GET /api/mitigations?status=approved`) or get them pushed (webhook, GitHub `repository_dispatch`, GitLab
+pipeline trigger, under *Settings > Hand-off*), claim, run the playbook and report `done` or `failed`. Guide with
+GitHub Actions and GitLab CI examples: [docs/mitigations.md](docs/mitigations.md). The same through MCP:
+`diysca mcp` or `<base_url>/mcp`, see [docs/mcp.md](docs/mcp.md).
 
 ## Known limitations / roadmap
 

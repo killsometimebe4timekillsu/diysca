@@ -5,6 +5,7 @@ import argparse
 import asyncio
 import json
 import logging
+import os
 import sys
 
 from . import __version__, db, notify, scanner
@@ -100,6 +101,21 @@ def main(argv=None):
     s.add_argument("--from", dest="frm", default="", help="custom range start (YYYY-MM-DD)")
     s.add_argument("--to", default="", help="custom range end (YYYY-MM-DD)")
     s.add_argument("--host", default="")
+
+    s = sp.add_parser("mcp", help="run the MCP server on stdio (for MCP clients and agents)")
+    s.add_argument("--actor", default="mcp:stdio", help="name recorded when this client claims or reports")
+
+    s = sp.add_parser("mitigations", help="approved findings handed off for mitigation")
+    s.add_argument("action", nargs="?", default="list",
+                   choices=["list", "show", "approve", "claim", "report", "cancel", "playbook"])
+    s.add_argument("id", nargs="?", type=int, help="mitigation id (show, claim, report, cancel, playbook)")
+    s.add_argument("--status", default="", help="list: open|approved|...|all; report: running|done|failed")
+    s.add_argument("--ids", default="", help="approve: comma separated finding ids")
+    s.add_argument("--filter", default="", help="approve: findings filter, e.g. 'host=web1&fix=repo'")
+    s.add_argument("--note", default="")
+    s.add_argument("--handoff", default="", help="approve: hand-off target name")
+    s.add_argument("--log", default="", help="report: text or @file")
+    s.add_argument("--by", default=os.environ.get("USER", "cli"), help="who approves / claims / reports")
 
     a = ap.parse_args(argv)
     if a.config:
@@ -272,6 +288,56 @@ def main(argv=None):
         for f in d["rows"]:
             print(f"{f['resolved_at'][:16]}  {f['host_name']:<20} {f['severity'] or '':<8} {f['vuln_id']:<18} "
                   f"{f['package']} {f['version']} -> {f['resolved_version'] or '-'} ({f['resolution'] or '?'})")
+    elif a.cmd == "mcp":
+        from . import mcp
+        asyncio.run(mcp.serve_stdio(a.actor))
+    elif a.cmd == "mitigations":
+        _mitigations(a)
+
+
+def _mitigations(a):
+    from . import mitigate
+    try:
+        if a.action == "list":
+            for m in mitigate.list_(a.status or "open"):
+                print(f"#{m['id']:<5} {m['status']:<9} {m['created_at'][:16]}  {m['findings']:>4} findings "
+                      f"({m['still_open']} open)  {', '.join(m['summary'].get('hosts', [])[:5])}  by {m['approved_by']}"
+                      + (f"  -> {m['handoff']}" if m["handoff"] else ""))
+            return
+        if a.action == "approve":
+            ids = [int(i) for i in a.ids.split(",") if i.strip()]
+            if not ids and a.filter:
+                from .web import _ids_from_filter
+                ids = _ids_from_filter(a.filter)
+            m = mitigate.approve(ids, a.by, a.note, a.handoff or None)
+            print(f"mitigation #{m['id']} approved: {len(m['findings'])} findings on {', '.join(m['hosts'])}")
+            print(m["links"]["ui"])
+            return
+        if a.id is None:
+            sys.exit("give the mitigation id")
+        if a.action == "show":
+            m = mitigate.get(a.id, with_playbook=False)
+            if not m:
+                sys.exit(f"no mitigation #{a.id}")
+            print(json.dumps(m, indent=2, default=str))
+        elif a.action == "playbook":
+            m = mitigate.get(a.id)
+            if not m:
+                sys.exit(f"no mitigation #{a.id}")
+            print(m["playbook"])
+        elif a.action == "claim":
+            print(f"#{a.id}: {mitigate.claim(a.id, a.by)['status']}")
+        elif a.action == "report":
+            log = open(a.log[1:]).read() if a.log.startswith("@") else a.log
+            m, rescan = mitigate.report(a.id, a.status, a.by, log)
+            print(f"#{a.id}: {m['status']}")
+            if rescan:
+                asyncio.run(scanner.scan_all(host_ids=rescan))
+                print(f"rescanned {len(rescan)} system(s)")
+        elif a.action == "cancel":
+            print(f"#{a.id}: {mitigate.cancel(a.id, a.by, a.note)['status']}")
+    except (mitigate.MitigationError, KeyError) as e:
+        sys.exit(f"error: {e}")
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ One YAML document, the same shape as config.yml where the two overlap:
     channels:       alert channels (Apprise URLs)
     subscriptions:  which findings go to which channel (channel by name)
     saved_filters:  saved filters of the Findings / Packages / Systems pages
+    handoffs:       where approved mitigations are sent (webhook, github, gitlab)
 
 Secrets (header values of sources, channel URLs) are replaced with "***"
 unless the export asks for them. On import, "***" keeps the value already
@@ -18,10 +19,10 @@ import re
 
 import yaml
 
-from . import __version__, db, sources
+from . import __version__, db, mitigate, sources
 
 MASK = "***"
-PARTS = ("sources", "channels", "subscriptions", "saved_filters")
+PARTS = ("sources", "channels", "subscriptions", "saved_filters", "handoffs")
 
 
 def _mask_url(url: str) -> str:
@@ -54,6 +55,11 @@ def export_bundle(include_secrets: bool = False, parts=PARTS) -> dict:
     if "saved_filters" in parts:
         out["saved_filters"] = [{"name": f["name"], "page": f["page"], "query": f["query"]}
                                 for f in db.q("SELECT * FROM saved_filters ORDER BY page, name")]
+    if "handoffs" in parts:
+        out["handoffs"] = [{"name": h["name"], "type": h["type"], "url": h["url"],
+                            "token": (h["token"] if include_secrets else MASK) if h["token"] else "",
+                            "auto": bool(h["auto"]), "enabled": bool(h["enabled"]), **json.loads(h["config"] or "{}")}
+                           for h in db.q("SELECT * FROM handoffs ORDER BY name")]
     return out
 
 
@@ -151,14 +157,29 @@ def import_bundle(data: dict, replace: bool = False, dry_run: bool = False) -> d
         plan.append(("filter", f["name"], f["page"], str(f.get("query") or "")))
         res["updated" if (f["page"], f["name"]) in have else "added"] += 1
 
+    # hand-off targets
+    hos = {h["name"] for h in db.q("SELECT name FROM handoffs")}
+    for i, h in enumerate(data.get("handoffs") or []):
+        if not isinstance(h, dict) or not h.get("name") or not h.get("type") or not h.get("url"):
+            res["errors"].append(f"handoffs[{i}]: needs name, type and url")
+            continue
+        if h["type"] not in mitigate.HANDOFF_TYPES:
+            res["errors"].append(f"handoff {h['name']}: type must be one of {', '.join(mitigate.HANDOFF_TYPES)}")
+            continue
+        cfg = {k: v for k, v in h.items() if k not in ("name", "type", "url", "token", "auto", "enabled")}
+        plan.append(("handoff", str(h["name"]), str(h["type"]), str(h["url"]), h.get("token") or None, cfg,
+                     _bool(h.get("enabled")), _bool(h.get("auto"), False)))
+        res["updated" if h["name"] in hos else "added"] += 1
+
     if replace:
         keep = {("source", p[1]) for p in plan if p[0] == "source"} | {("channel", p[1]) for p in plan if p[0] == "channel"} \
-            | {("sub", p[1]) for p in plan if p[0] == "sub"} | {("filter", (p[2], p[1])) for p in plan if p[0] == "filter"}
+            | {("sub", p[1]) for p in plan if p[0] == "sub"} | {("handoff", p[1]) for p in plan if p[0] == "handoff"} | {("filter", (p[2], p[1])) for p in plan if p[0] == "filter"}
         drops = [("source", s["name"]) for s in existing.values() if s["origin"] == "ui" and ("source", s["name"]) not in keep
                  and "sources" in data]
         drops += [("channel", n) for n in chans if ("channel", n) not in keep and "channels" in data]
         drops += [("sub", n) for n in subs if ("sub", n) not in keep and "subscriptions" in data]
         drops += [("filter", k) for k in have if ("filter", k) not in keep and "saved_filters" in data]
+        drops += [("handoff", n) for n in hos if ("handoff", n) not in keep and "handoffs" in data]
         res["removed"] = len(drops)
     else:
         drops = []
@@ -185,6 +206,12 @@ def import_bundle(data: dict, replace: bool = False, dry_run: bool = False) -> d
             else:
                 db.x("""INSERT INTO subscriptions(name, channel_id, host_pattern, package_pattern, min_severity, only_kev,
                         only_fixable, enabled) VALUES (?,?,?,?,?,?,?,?)""", (name, cid, hosts, pkgs, sev, kev, fix, en))
+        elif p[0] == "handoff":
+            _, name, typ, url, token, cfg, en, auto = p
+            try:
+                mitigate.save_handoff(name, typ, url, token, cfg, bool(en), bool(auto))
+            except mitigate.MitigationError as e:
+                res["errors"].append(f"handoff {name}: {e}")
         elif p[0] == "filter":
             _, name, page, query = p
             db.x("DELETE FROM saved_filters WHERE page=? AND name=?", (page, name))
@@ -196,6 +223,8 @@ def import_bundle(data: dict, replace: bool = False, dry_run: bool = False) -> d
             db.x("DELETE FROM channels WHERE name=?", (key,))
         elif kind == "sub":
             db.x("DELETE FROM subscriptions WHERE name=?", (key,))
+        elif kind == "handoff":
+            mitigate.remove_handoff(key)
         else:
             db.x("DELETE FROM saved_filters WHERE page=? AND name=?", key)
     db.event("settings", f"import: {res['added']} added, {res['updated']} updated, {res['removed']} removed")
