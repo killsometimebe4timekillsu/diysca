@@ -15,3 +15,10 @@
 {% endmacro %}
 
 {% macro sev(s) %}<span class="sev {{ s or 'UNKNOWN' }}">{{ s or 'UNKNOWN' }}</span>{% endmacro %}
+
+{% macro settings_tabs(tab) %}
+<nav class="tabs" aria-label="Settings">
+{% for key, href, label in [('general','/settings','General'),('sources','/settings/sources','CVE sources'),('notifications','/settings/notifications','Notifications'),('repos','/settings/repos','Repo managers'),('backup','/settings/backup','Import / export')] %}
+<a href="{{ href }}" class="{{ 'on' if tab == key }}">{{ label }}</a>{% endfor %}
+</nav>
+{% endmacro %}

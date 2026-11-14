@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}diysca{% endblock %} · diysca</title>
 {% if running %}<meta http-equiv="refresh" content="10">{% endif %}
-<script>try{var t=localStorage.getItem("diysca-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}</script>
+<script>try{var t=localStorage.getItem("diysca-theme");if(t)document.documentElement.dataset.theme=t;if(localStorage.getItem("diysca-nav")==="wide")document.documentElement.dataset.nav="wide"}catch(e){}</script>
 <style>
 /* Classic Grafana look: dark canvas, icon side menu, flat panels, 2px corners, small panel titles.
    Dark is the default; light is an explicit choice (theme button at the bottom of the side menu). */
@@ -41,6 +41,22 @@ a{color:var(--link);text-decoration:none}a:hover{text-decoration:underline}
 .side .tip{position:absolute;left:48px;top:50%;transform:translateY(-50%);background:var(--panel-2);color:var(--text-strong);border:1px solid var(--border);padding:4px 10px;border-radius:2px;white-space:nowrap;font-size:13px;pointer-events:none;opacity:0;transition:opacity .1s}
 .side a:hover .tip,.side button:hover .tip,.side a:focus-visible .tip{opacity:1}
 .side .spacer{flex:1}
+.side .logo{background:none;border:0;cursor:pointer}
+.side .brand,.side .label{display:none}
+html[data-nav=wide] .side{width:200px;align-items:stretch;padding:8px}
+html[data-nav=wide] .side a,html[data-nav=wide] .side button{width:auto;display:flex;align-items:center;gap:12px;padding:0 10px;justify-content:flex-start}
+html[data-nav=wide] .side .tip{display:none}
+html[data-nav=wide] .side .label,html[data-nav=wide] .side .brand{display:inline;font-size:13px;color:inherit;white-space:nowrap}
+html[data-nav=wide] .side .brand{font-size:16px;font-weight:500;color:var(--text-strong)}
+html[data-nav=wide] .side a.on::before{left:0}
+html[data-nav=wide] .wrap,html[data-nav=wide] footer{margin-left:200px}
+.side hr{width:32px;border:0;border-top:1px solid var(--border);margin:6px 0}
+html[data-nav=wide] .side hr{width:auto}
+.tabs{display:flex;gap:2px;border-bottom:1px solid var(--border);overflow-x:auto}
+.tabs a{padding:8px 14px;color:var(--muted);font-weight:500;border-bottom:2px solid transparent;white-space:nowrap}
+.tabs a:hover{color:var(--text-strong);text-decoration:none}
+.tabs a.on{color:var(--text-strong);border-bottom-color:#f05a28}
+.notice ul{margin:4px 0 0 18px;padding:0}
 
 /* top bar */
 .wrap{margin-left:56px;min-width:0}
@@ -131,7 +147,9 @@ footer{margin-left:56px;padding:8px 16px 16px;color:var(--muted);font-size:12px}
   .side{inset:auto 0 0 0;width:auto;height:52px;flex-direction:row;justify-content:space-around;border-right:0;border-top:1px solid var(--border);padding:0 4px;overflow-x:auto}
   .side .logo,.side .spacer,.side .tip{display:none}
   .side a.on::before{left:6px;right:6px;top:auto;bottom:-6px;height:3px;width:auto}
-  .wrap,footer{margin-left:0}
+  .wrap,footer,html[data-nav=wide] .wrap,html[data-nav=wide] footer{margin-left:0}
+  html[data-nav=wide] .side{width:auto;flex-direction:row;padding:0 4px}
+  html[data-nav=wide] .side .label,.side hr{display:none}
   footer{padding-bottom:70px}
   main{padding:12px 12px 70px}
 }
@@ -144,19 +162,19 @@ footer{margin-left:56px;padding:8px 16px 16px;color:var(--muted);font-size:12px}
   ('systems', '/systems', 'Systems', 'M3 4h18v6H3zM3 14h18v6H3zM7 7h.01M7 17h.01'),
   ('packages', '/packages', 'Packages', 'M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8'),
   ('findings', '/findings', 'Findings', 'M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6zM12 8v5M12 16h.01'),
+  ('patching', '/patching', 'Patching', 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 16.5V8M8 11.5l4-4 4 4'),
   ('patched', '/patched', 'Patched CVEs', 'M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6zM8.5 12l2.5 2.5 4.5-4.5'),
-  ('patching', '/patching', 'Patching', 'M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z'),
-  ('alerts', '/alerts', 'Alerts', 'M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0'),
-  ('sources', '/sources', 'CVE sources', 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v6c0 1.7 3.6 3 8 3s8-1.3 8-3V6M4 12v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6'),
 ] %}
-{% set section = {'system': 'systems', 'finding': 'findings'}.get(page, page) %}
+{% set gear = 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z' %}
+{% set section = 'settings' if tab is defined else {'system': 'systems', 'finding': 'findings'}.get(page, page) %}
 <nav class="side" aria-label="Main">
-  <a class="logo" href="/" aria-label="diysca home"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z" stroke="#f05a28" fill="rgba(240,90,40,.12)"/><path d="M8.5 12l2.5 2.5 4.5-4.5" stroke="#fbca0a"/></svg></a>
+  <button type="button" class="logo" id="navbtn" aria-label="Show or hide menu names" title="Show or hide menu names"><svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z" stroke="#f05a28" fill="rgba(240,90,40,.12)"/><path d="M8.5 12l2.5 2.5 4.5-4.5" stroke="#fbca0a"/></svg><span class="brand">diysca</span></button>
   {% for key, href, label, d in nav %}
-  <a href="{{ href }}" class="{{ 'on' if section == key }}" aria-label="{{ label }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{{ d }}"/></svg><span class="tip">{{ label }}</span></a>
+  <a href="{{ href }}" class="{{ 'on' if section == key }}" aria-label="{{ label }}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{{ d }}"/></svg><span class="label">{{ label }}</span><span class="tip">{{ label }}</span></a>
   {% endfor %}
   <span class="spacer"></span>
-  <button type="button" id="themebtn" aria-label="Switch theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/></svg><span class="tip">Switch light / dark</span></button>
+  <a href="/settings" class="{{ 'on' if section == 'settings' }}" aria-label="Settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="{{ gear }}"/></svg><span class="label">Settings</span><span class="tip">Settings</span></a>
+  <button type="button" id="themebtn" aria-label="Switch theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16z" fill="currentColor"/></svg><span class="label">Light / dark</span><span class="tip">Switch light / dark</span></button>
 </nav>
 <div class="wrap">
 <div class="topbar">
@@ -172,6 +190,10 @@ footer{margin-left:56px;padding:8px 16px 16px;color:var(--muted);font-size:12px}
 </div>
 <footer>diysca {{ version }} · vulnerability data: OSV.dev, NVD, CISA KEV{% if extra_source_names %}, {{ extra_source_names }}{% endif %}</footer>
 <script>
+document.getElementById("navbtn").addEventListener("click",function(){
+  var r=document.documentElement,w=r.dataset.nav==="wide";if(w)delete r.dataset.nav;else r.dataset.nav="wide";
+  try{localStorage.setItem("diysca-nav",w?"icons":"wide")}catch(e){}
+});
 document.getElementById("themebtn").addEventListener("click",function(){
   var r=document.documentElement,n=r.dataset.theme==="light"?"dark":"light";r.dataset.theme=n;
   try{localStorage.setItem("diysca-theme",n)}catch(e){}

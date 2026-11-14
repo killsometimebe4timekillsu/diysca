@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, db, notify, patch, patched, repomgr, scanner, sources
+from . import __version__, db, notify, patch, patched, repomgr, scanner, settings_io, sources
 from .config import settings
 from .feeds import SEVERITY_ORDER, sev_rank
 from .sbom import build_sbom, sbom_json
@@ -260,14 +262,14 @@ def finding_status(fid: int, status: str = Form(...), back: str = Form("/finding
     return RedirectResponse(back, 303)
 
 
-@app.get("/alerts")
+@app.get("/settings/notifications")
 def alerts(request: Request):
     chans = db.q("SELECT * FROM channels ORDER BY name")
     subs = db.q("SELECT s.*, c.name channel FROM subscriptions s JOIN channels c ON c.id=s.channel_id ORDER BY s.name")
     log = db.q("""SELECT n.*, c.name channel, f.vuln_id, f.package, h.name host FROM notifications n
                   JOIN channels c ON c.id=n.channel_id JOIN findings f ON f.id=n.finding_id JOIN hosts h ON h.id=f.host_id
                   ORDER BY n.sent_at DESC LIMIT 50""")
-    return render(request, "alerts.html", chans=chans, subs=subs, log=log, severities=SEVERITY_ORDER[2:],
+    return render(request, "alerts.html", tab="notifications", chans=chans, subs=subs, log=log, severities=SEVERITY_ORDER[2:],
                   groups=all_groups(), msg=request.query_params.get("msg"))
 
 
@@ -294,15 +296,15 @@ def _builtin_sources() -> list[dict]:
     ]
 
 
-@app.get("/sources")
+@app.get("/settings/sources")
 def sources_view(request: Request):
     sources.sync_config_sources()
-    return render(request, "sources.html", builtin=_builtin_sources(), extra=[sources.public(s) for s in sources.all_sources()],
+    return render(request, "sources.html", tab="sources", builtin=_builtin_sources(), extra=[sources.public(s) for s in sources.all_sources()],
                   types=sources.TYPES, default_urls=sources.DEFAULT_URLS, msg=request.query_params.get("msg"),
                   err=request.query_params.get("err"))
 
 
-@app.post("/sources")
+@app.post("/settings/sources")
 def add_source(name: str = Form(...), type: str = Form(...), url: str = Form(""), refresh_hours: str = Form("24"),
                options: str = Form("")):
     import yaml
@@ -315,31 +317,108 @@ def add_source(name: str = Form(...), type: str = Form(...), url: str = Form("")
         cfg["refresh_hours"] = float(refresh_hours or 24)
         sources.save(name.strip(), type, cfg)
     except (ValueError, yaml.YAMLError) as e:
-        return RedirectResponse("/sources?" + urlencode({"err": str(e)}), 303)
+        return RedirectResponse("/settings/sources?" + urlencode({"err": str(e)}), 303)
     _bg_run(sources.refresh(name.strip()))
-    return RedirectResponse("/sources?" + urlencode({"msg": f"Added {name}. Downloading it now."}), 303)
+    return RedirectResponse("/settings/sources?" + urlencode({"msg": f"Added {name}. Downloading it now."}), 303)
 
 
-@app.post("/sources/{name}/refresh")
+@app.post("/settings/sources/{name}/refresh")
 def refresh_source(name: str):
     if not sources.get(name):
         raise HTTPException(404)
     _bg_run(sources.refresh(name))
-    return RedirectResponse("/sources?" + urlencode({"msg": f"Refreshing {name}. Reload in a moment."}), 303)
+    return RedirectResponse("/settings/sources?" + urlencode({"msg": f"Refreshing {name}. Reload in a moment."}), 303)
 
 
-@app.post("/sources/{name}/toggle")
+@app.post("/settings/sources/{name}/toggle")
 def toggle_source(name: str):
     db.x("UPDATE feed_sources SET enabled=1-enabled WHERE name=? AND origin='ui'", (name,))
-    return RedirectResponse("/sources", 303)
+    return RedirectResponse("/settings/sources", 303)
 
 
-@app.post("/sources/{name}/delete")
+@app.post("/settings/sources/{name}/delete")
 def delete_source(name: str):
     s = sources.get(name)
     if s and s["origin"] == "ui":
         sources.remove(name)
-    return RedirectResponse("/sources", 303)
+    return RedirectResponse("/settings/sources", 303)
+
+
+@app.get("/alerts")
+def alerts_moved():
+    return RedirectResponse("/settings/notifications", 301)
+
+
+@app.get("/sources")
+def sources_moved():
+    return RedirectResponse("/settings/sources", 301)
+
+
+_SECRET_KEYS = ("password", "token", "api_key", "secret")
+
+
+def _masked(v):
+    if isinstance(v, dict):
+        return {k: ("***" if any(s in k for s in _SECRET_KEYS) and v[k] and not k.endswith("_env") else _masked(x))
+                for k, x in v.items()}
+    if isinstance(v, list):
+        return [_masked(x) for x in v]
+    if isinstance(v, str) and "://" in v and "@" in v:
+        return re.sub(r"://[^@/]*@", "://***@", v)
+    return v
+
+
+@app.get("/settings")
+def settings_general(request: Request):
+    from dataclasses import fields
+    from .config import default_config_path
+    rows = []
+    for f in fields(settings):
+        if f.name in ("sources", "repo_managers"):
+            continue
+        v = getattr(settings, f.name)
+        if any(s in f.name for s in _SECRET_KEYS) and v:
+            v = "***"
+        rows.append((f.name, _masked(v)))
+    return render(request, "settings_general.html", tab="general", rows=rows,
+                  config_path=os.environ.get("DIYSCA_CONFIG") or default_config_path(),
+                  db_kind="PostgreSQL" if db.is_postgres() else "SQLite")
+
+
+@app.get("/settings/repos")
+def settings_repos(request: Request):
+    import yaml
+    mgrs = [{"name": m["name"], "type": m.get("type"), "url": m.get("url"), "match": m.get("match"),
+             "yaml": yaml.safe_dump(_masked(m), sort_keys=False)} for m in repomgr.managers()]
+    return render(request, "settings_repos.html", tab="repos", mgrs=mgrs)
+
+
+@app.get("/settings/backup")
+def settings_backup(request: Request):
+    return render(request, "settings_backup.html", tab="backup", parts=settings_io.PARTS,
+                  result=None, msg=request.query_params.get("msg"))
+
+
+@app.get("/settings/export.yml")
+def settings_export(secrets: int = 0, parts: str = ""):
+    want = [p for p in parts.split(",") if p in settings_io.PARTS] or list(settings_io.PARTS)
+    return Response(settings_io.export_yaml(bool(secrets), want), media_type="application/x-yaml",
+                    headers={"Content-Disposition": 'attachment; filename="diysca-settings.yml"'})
+
+
+@app.post("/settings/import")
+async def settings_import(request: Request, file: UploadFile | None = File(None), text: str = Form(""),
+                          replace: str = Form(""), dry_run: str = Form("")):
+    body = text
+    if file is not None and file.filename:
+        body = (await file.read()).decode("utf-8", "replace")
+    try:
+        result = settings_io.import_bundle(settings_io.parse(body), replace=bool(replace), dry_run=bool(dry_run))
+    except ValueError as e:
+        result = {"added": 0, "updated": 0, "removed": 0, "skipped": [], "errors": [str(e)]}
+    result["dry_run"] = bool(dry_run) or bool(result["errors"])
+    return render(request, "settings_backup.html", tab="backup", parts=settings_io.PARTS, result=result,
+                  msg=None, text=body)
 
 
 # -------------------------------------------------------------- actions
@@ -390,6 +469,37 @@ def inventory_import(path: str = Form("")):
     return RedirectResponse("/systems", 303)
 
 
+@app.get("/systems/{host_id}/reprovision.yml")
+def reprovision_host(host_id: int, mode: str = "fixed", target: str = ""):
+    from . import reprovision
+    h = db.q1("SELECT name FROM hosts WHERE id=?", (host_id,))
+    if not h:
+        raise HTTPException(404)
+    try:
+        text, _ = reprovision.for_host(host_id, "exact" if mode == "exact" else "fixed", target.strip() or None)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return Response(text, media_type="application/x-yaml",
+                    headers={"Content-Disposition": f'attachment; filename="reprovision-{h["name"]}.yml"'})
+
+
+@app.post("/reprovision")
+async def reprovision_upload(request: Request, file: UploadFile = File(...), mode: str = Form("fixed"),
+                             target: str = Form("")):
+    import json as _json
+
+    from . import reprovision
+    try:
+        sbom_doc = _json.loads((await file.read()).decode("utf-8", "replace"))
+        text, summary = reprovision.build(sbom_doc, "exact" if mode == "exact" else "fixed", target.strip() or None)
+    except ValueError as e:
+        ctx = _patching_ctx()
+        ctx["reprovision_error"] = f"{file.filename}: {e}"
+        return render(request, "patching.html", **ctx)
+    return Response(text, media_type="application/x-yaml",
+                    headers={"Content-Disposition": f'attachment; filename="reprovision-{summary["system"]}.yml"'})
+
+
 @app.get("/systems/{host_id}/sbom.json")
 def sbom(host_id: int):
     h = db.q1("SELECT name FROM hosts WHERE id=?", (host_id,))
@@ -402,20 +512,20 @@ def sbom(host_id: int):
 @app.post("/channels")
 def add_channel(name: str = Form(...), url: str = Form(...)):
     db.x("INSERT INTO channels(name,url) VALUES (?,?) ON CONFLICT(name) DO UPDATE SET url=excluded.url", (name, url))
-    return RedirectResponse("/alerts", 303)
+    return RedirectResponse("/settings/notifications", 303)
 
 
 @app.post("/channels/{cid}/delete")
 def del_channel(cid: int):
     db.x("DELETE FROM channels WHERE id=?", (cid,))
-    return RedirectResponse("/alerts", 303)
+    return RedirectResponse("/settings/notifications", 303)
 
 
 @app.post("/channels/{cid}/test")
 async def test_channel(cid: int):
     ch = db.q1("SELECT * FROM channels WHERE id=?", (cid,))
     ok, err = await notify.send_to_channel(ch, "[diysca] test", "Test notification from diysca. It works!")
-    return RedirectResponse("/alerts?" + urlencode({"msg": f"{ch['name']}: " + ("sent" if ok else err)}), 303)
+    return RedirectResponse("/settings/notifications?" + urlencode({"msg": f"{ch['name']}: " + ("sent" if ok else err)}), 303)
 
 
 @app.post("/subscriptions")
@@ -430,25 +540,25 @@ def add_sub(name: str = Form(...), channel_id: int = Form(...), host_pattern: st
     else:
         db.x("""INSERT INTO subscriptions(name,channel_id,host_pattern,package_pattern,min_severity,only_kev,only_fixable)
                 VALUES (?,?,?,?,?,?,?)""", vals)
-    return RedirectResponse("/alerts", 303)
+    return RedirectResponse("/settings/notifications", 303)
 
 
 @app.post("/subscriptions/{sid}/delete")
 def del_sub(sid: int):
     db.x("DELETE FROM subscriptions WHERE id=?", (sid,))
-    return RedirectResponse("/alerts", 303)
+    return RedirectResponse("/settings/notifications", 303)
 
 
 @app.post("/subscriptions/{sid}/toggle")
 def toggle_sub(sid: int):
     db.x("UPDATE subscriptions SET enabled = 1 - enabled WHERE id=?", (sid,))
-    return RedirectResponse("/alerts", 303)
+    return RedirectResponse("/settings/notifications", 303)
 
 
-@app.post("/alerts/dispatch")
+@app.post("/settings/notifications/dispatch")
 async def dispatch_now():
     n = await notify.dispatch()
-    return RedirectResponse("/alerts?" + urlencode({"msg": f"sent {n} alerts"}), 303)
+    return RedirectResponse("/settings/notifications?" + urlencode({"msg": f"sent {n} alerts"}), 303)
 
 
 @app.post("/filters")

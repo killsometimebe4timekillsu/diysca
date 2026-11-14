@@ -78,6 +78,20 @@ def main(argv=None):
     s = sp.add_parser("notify", help="send pending alerts")
     s.add_argument("--dry-run", action="store_true")
 
+    s = sp.add_parser("reprovision", help="Ansible playbook that rebuilds a system from its SBOM")
+    s.add_argument("host", nargs="?", help="system name (or use --sbom)")
+    s.add_argument("--sbom", help="CycloneDX JSON file instead of a scanned system")
+    s.add_argument("--mode", choices=["fixed", "exact"], default="fixed")
+    s.add_argument("--target", help="inventory host or group to run against (default: the system name)")
+    s.add_argument("-o", "--output")
+
+    s = sp.add_parser("settings", help="export or import settings (sources, channels, subscriptions, saved filters)")
+    s.add_argument("action", choices=["export", "import"])
+    s.add_argument("file", nargs="?", help="import: YAML/JSON file (default stdin)")
+    s.add_argument("--secrets", action="store_true", help="export: include channel URLs and source headers")
+    s.add_argument("--replace", action="store_true", help="import: remove items that are not in the file")
+    s.add_argument("--dry-run", action="store_true")
+
     s = sp.add_parser("sources", help="list or refresh the extra CVE sources (config.yml `sources:` / web UI)")
     s.add_argument("--refresh", nargs="?", const="all", metavar="NAME", help="download now (all, or one source)")
 
@@ -213,6 +227,32 @@ def main(argv=None):
             sys.exit(1)
     elif a.cmd == "notify":
         print(f"sent {asyncio.run(notify.dispatch(dry_run=a.dry_run))} alerts")
+    elif a.cmd == "reprovision":
+        from . import reprovision
+        if a.sbom:
+            with open(a.sbom) as fh:
+                text, summary = reprovision.build(json.load(fh), a.mode, a.target)
+        else:
+            h = db.q1("SELECT id FROM hosts WHERE name=?", (a.host,))
+            if not h:
+                sys.exit(f"unknown system {a.host!r}")
+            text, summary = reprovision.for_host(h["id"], a.mode, a.target)
+        if a.output:
+            with open(a.output, "w") as fh:
+                fh.write(text)
+            print(f"wrote {a.output}: {summary}", file=sys.stderr)
+        else:
+            print(text)
+    elif a.cmd == "settings":
+        from . import settings_io
+        if a.action == "export":
+            print(settings_io.export_yaml(a.secrets), end="")
+        else:
+            body = open(a.file).read() if a.file else sys.stdin.read()
+            res = settings_io.import_bundle(settings_io.parse(body), replace=a.replace, dry_run=a.dry_run)
+            print(res)
+            if res["errors"]:
+                sys.exit(1)
     elif a.cmd == "sources":
         from . import sources
         sources.sync_config_sources()

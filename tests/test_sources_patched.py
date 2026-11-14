@@ -196,5 +196,5 @@ def test_pages(monkeypatch):
                     "/patched?range=bogus", "/sources", "/api/patched?range=7d", "/api/sources", "/"]:
             assert c.get(url).status_code == 200, url
         assert "CVE-1" in c.get("/patched?range=24h").text
-        r = c.post("/sources", data={"name": "Bad Name", "type": "osv", "url": "https://x"}, follow_redirects=False)
+        r = c.post("/settings/sources", data={"name": "Bad Name", "type": "osv", "url": "https://x"}, follow_redirects=False)
         assert r.status_code == 303 and "err=" in r.headers["location"]

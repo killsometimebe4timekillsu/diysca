@@ -10,7 +10,8 @@
  groups {% for g in (h.groups or '').split(',') if g %}<span class="tag">{{ g }}</span>{% endfor %} · source {{ h.source }} · last scan {{ h.last_scan or 'never' }}</p>
 <form method="post" action="/systems/{{ h.id }}/scan" class="inline"><button>Scan now</button></form>
 {% if h.kind != 'container' %}<form method="post" action="/patch/playbook" class="inline"><input type="hidden" name="host_id" value="{{ h.id }}"><button class="secondary">Patch playbook</button></form>{% endif %}
-<a class="btn" href="/systems/{{ h.id }}/sbom.json">Download SBOM (CycloneDX)</a>
+<a class="btn secondary" href="/systems/{{ h.id }}/sbom.json">Download SBOM (CycloneDX)</a>
+{% if h.kind != 'container' %}<a class="btn secondary" href="/systems/{{ h.id }}/reprovision.yml" title="Ansible playbook that rebuilds this system from its SBOM, with fixable vulnerabilities fixed">Reprovision playbook</a>{% endif %}
 <form method="post" action="/systems/{{ h.id }}/delete" class="inline" onsubmit="return confirm('Delete {{ h.name }}?')"><button class="danger">Delete</button></form>
 </div>
 <div class="card"><h2>Open findings ({{ findings|length }})</h2>

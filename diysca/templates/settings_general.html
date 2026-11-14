@@ -1,0 +1,19 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+{{ m.settings_tabs(tab) }}
+<div class="card"><h2>Where settings live</h2>
+<table>
+<tr><th>Setting</th><th>Kept in</th><th>Change it</th></tr>
+<tr><td>Scanning, feeds, database, web access, inventories</td><td class="mono">{{ config_path or 'no config file (defaults + DIYSCA_* variables)' }}</td><td>edit the file or set <span class="mono">DIYSCA_&lt;NAME&gt;</span>, then restart</td></tr>
+<tr><td>CVE sources</td><td>config.yml <span class="mono">sources:</span> and the database</td><td><a href="/settings/sources">CVE sources</a></td></tr>
+<tr><td>Alert channels and subscriptions</td><td>database</td><td><a href="/settings/notifications">Notifications</a></td></tr>
+<tr><td>Repo managers (aptly, Pulp, Foreman)</td><td>config.yml <span class="mono">repo_managers:</span></td><td><a href="/settings/repos">Repo managers</a> (read only)</td></tr>
+<tr><td>Everything stored in the database</td><td>{{ db_kind }}</td><td><a href="/settings/backup">Import / export</a> as one YAML file</td></tr>
+</table></div>
+<div class="card"><h2>Effective configuration</h2>
+<p class="muted">Defaults, then the config file, then environment variables. Secrets are hidden.</p>
+<table><tr><th>Name</th><th>Value</th><th>Environment variable</th></tr>
+{% for k, v in rows %}<tr><td class="mono">{{ k }}</td><td class="mono">{{ v if v is not string or v else '–' }}</td><td class="mono muted">DIYSCA_{{ k|upper }}</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

@@ -1,6 +1,7 @@
-{% extends "base.html" %}
-{% block title %}CVE sources{% endblock %}
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Settings{% endblock %}
 {% block content %}
+{{ m.settings_tabs(tab) }}
 {% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
 {% if err %}<div class="notice bad">{{ err }}</div>{% endif %}
 <div class="card"><h2>Built-in sources</h2>
@@ -9,7 +10,7 @@
 <td class="{{ 'ok' if s.enabled else 'muted' }}">{{ s.info if s.enabled else 'disabled in config' }}</td><td class="mono">{{ (s.fetched_at or '–')[:16]|replace('T',' ') }}</td></tr>{% endfor %}
 </table></div>
 
-<div class="card"><h2>Extra sources</h2>
+<div class="card"><h2>Extra sources <span style="float:right;font-weight:400"><a class="btn secondary sm" href="/settings/export.yml?parts=sources">Export sources</a> <a class="btn secondary sm" href="/settings/backup">Import</a></span></h2>
 <p class="muted">Every extra source is downloaded on its own schedule, converted to OSV records and matched with the same version logic as OSV data. Findings show which source reported them. Sources from <span class="mono">config.yml</span> can only be changed there.</p>
 <table><tr><th>Name</th><th>Type</th><th>URL / path</th><th>Records</th><th>Status</th><th>Last update</th><th>Every</th><th></th></tr>
 {% for s in extra %}<tr class="{{ 'muted' if not s.enabled }}">
@@ -21,16 +22,16 @@
 <td class="mono">{{ (s.fetched_at or '–')[:16]|replace('T',' ') }}</td>
 <td>{{ s.cfg.refresh_hours or 24 }} h</td>
 <td style="white-space:nowrap">
-  <form method="post" action="/sources/{{ s.name }}/refresh" class="inline"><button class="secondary sm">Refresh</button></form>
-  {% if s.origin == 'ui' %}<form method="post" action="/sources/{{ s.name }}/toggle" class="inline"><button class="secondary sm">{{ 'Disable' if s.enabled else 'Enable' }}</button></form>
-  <form method="post" action="/sources/{{ s.name }}/delete" class="inline" onsubmit="return confirm('Remove {{ s.name }} and its records?')"><button class="danger sm">Remove</button></form>{% endif %}
+  <form method="post" action="/settings/sources/{{ s.name }}/refresh" class="inline"><button class="secondary sm">Refresh</button></form>
+  {% if s.origin == 'ui' %}<form method="post" action="/settings/sources/{{ s.name }}/toggle" class="inline"><button class="secondary sm">{{ 'Disable' if s.enabled else 'Enable' }}</button></form>
+  <form method="post" action="/settings/sources/{{ s.name }}/delete" class="inline" onsubmit="return confirm('Remove {{ s.name }} and its records?')"><button class="danger sm">Remove</button></form>{% endif %}
 </td></tr>
 {% else %}<tr><td colspan="8" class="muted">No extra sources yet. Add one below or under <span class="mono">sources:</span> in config.yml.</td></tr>{% endfor %}
 </table></div>
 
 <div class="row">
 <div class="card"><h2>Add a source</h2>
-<form method="post" action="/sources" class="filters" style="flex-direction:column;align-items:stretch;max-width:640px">
+<form method="post" action="/settings/sources" class="filters" style="flex-direction:column;align-items:stretch;max-width:640px">
   <label>Name<input name="name" required pattern="[a-z0-9][a-z0-9_.\-]*" placeholder="debian-tracker"></label>
   <label>Type<select name="type">{% for k, l in types.items() %}<option value="{{ k }}">{{ l }} ({{ k }})</option>{% endfor %}</select></label>
   <label>URL or file:// path <input name="url" placeholder="empty = the type's default URL"></label>
