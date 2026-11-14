@@ -1,0 +1,76 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Patched CVEs{% endblock %}
+{% set keep = {'host': args.host, 'group': args.group, 'severity': args.severity, 'eco': args.eco, 'how': args.how} %}
+{% macro qs(extra) %}{% for k, v in dict(keep, **extra).items() if v %}{{ '&' if not loop.first }}{{ k }}={{ v|urlencode }}{% endfor %}{% endmacro %}
+{% block toolbar %}
+<details class="picker">
+  <summary><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>{{ label }}<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg></summary>
+  <div class="menu">
+    <div><h3>Absolute time range</h3>
+      <form method="get" class="filters" style="flex-direction:column;align-items:stretch">
+        {% for k, v in keep.items() if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+        <input type="hidden" name="range" value="custom">
+        <label>From<input type="date" name="from" value="{{ args.get('from', '') }}" required></label>
+        <label>To<input type="date" name="to" value="{{ args.get('to', '') }}"></label>
+        <button>Apply time range</button>
+      </form></div>
+    <div><h3>Quick ranges</h3>
+      {% for k, l in ranges.items() %}<a href="/patched?{{ qs({'range': k}) }}" class="{{ 'on' if range == k }}">{{ l }}</a>{% endfor %}
+    </div>
+  </div>
+</details>
+{% endblock %}
+{% block content %}
+<div class="grid">
+  <div class="stat"><span class="muted">CVEs patched</span><b class="ok">{{ stats.cves }}</b><small>{{ stats.findings }} findings</small></div>
+  <div class="stat"><span class="muted">Systems patched</span><b>{{ stats.systems }}</b><small>{{ range == 'last' and 'each at its last patching' or label|lower }}</small></div>
+  <div class="stat"><span class="muted">Critical + high</span><b class="{{ 'warn' if stats.critical_high }}">{{ stats.critical_high }}</b><small>of {{ stats.findings }}</small></div>
+  <div class="stat"><span class="muted">Known exploited</span><b class="{{ 'bad' if stats.kev }}">{{ stats.kev }}</b><small>CISA KEV</small></div>
+  <div class="stat"><span class="muted">Median time to patch</span><b class="info">{{ stats.median_days if stats.median_days is not none else '–' }}{% if stats.median_days is not none %}<small> days</small>{% endif %}</b><small>first seen → gone</small></div>
+  <div class="stat"><span class="muted">Still open</span><b>{{ stats.open_now }}</b><small><a href="/findings">open findings</a></small></div>
+</div>
+
+<div class="card">
+  <h2>Patched findings over time</h2>
+  {% if chart %}{{ chart|safe }}
+  <div class="legend">{% for s in ['CRITICAL','HIGH','MEDIUM','LOW','UNKNOWN'] %}<span><i style="background:var(--{{ {'CRITICAL':'red','HIGH':'orange','MEDIUM':'yellow','LOW':'blue','UNKNOWN':'grey'}[s] }})"></i>{{ s|lower }} ({{ by_sev.get(s, 0) }})</span>{% endfor %}
+    <span><i style="background:var(--purple)"></i>playbook generated</span><span><i style="background:var(--green)"></i>repo updated</span></div>
+  {% else %}<p class="muted">Nothing was patched in this time range.</p>{% endif %}
+</div>
+
+<div class="row">
+<div class="card" style="flex:3">
+  <h2>Patched CVEs <span class="muted">· {{ label }}{% if start %} · {{ start[:16]|replace('T',' ') }} → {{ end[:16]|replace('T',' ') }} UTC{% endif %}</span></h2>
+  <form class="filters" method="get">
+    <input type="hidden" name="range" value="{{ range }}">{% if range == 'custom' %}<input type="hidden" name="from" value="{{ args.get('from','') }}"><input type="hidden" name="to" value="{{ args.get('to','') }}">{% endif %}
+    <label>System<input name="host" value="{{ args.host or '' }}"></label>
+    <label>Group<select name="group"><option value="">any</option>{% for g in groups %}<option {{ 'selected' if args.group==g }}>{{ g }}</option>{% endfor %}</select></label>
+    <label>Min severity<select name="severity"><option value="">any</option>{% for s in severities %}<option {{ 'selected' if args.severity==s }}>{{ s }}</option>{% endfor %}</select></label>
+    <label>Type<select name="eco"><option value="">all</option><option value="os" {{ 'selected' if args.eco=='os' }}>OS packages</option><option value="lang" {{ 'selected' if args.eco=='lang' }}>language packages</option></select></label>
+    <label>How<select name="how"><option value="">any</option>{% for h in ['upgraded','removed','not-affected'] %}<option {{ 'selected' if args.how==h }}>{{ h }}</option>{% endfor %}</select></label>
+    <button>Filter</button> <a href="/patched?range={{ range }}">reset</a> · <a href="/api/patched?{{ query_string }}">JSON</a>
+  </form>
+  <table style="margin-top:8px"><tr><th>Patched</th><th>System</th><th>Severity</th><th>CVE</th><th>Package</th><th>Version</th><th>How</th><th>Open for</th></tr>
+  {% for f in rows %}<tr>
+    <td class="mono">{{ f.resolved_at[:16]|replace('T',' ') }}</td>
+    <td><a href="/systems/{{ f.host_id }}">{{ f.host_name }}</a></td>
+    <td>{{ m.sev(f.severity) }} {% if f.kev %}<span class="kev">KEV</span>{% endif %}</td>
+    <td><a href="/findings/{{ f.id }}">{{ f.vuln_id }}</a></td>
+    <td>{% if f.ecosystem %}<span class="tag">{{ f.ecosystem }}</span> {% endif %}{{ f.package }}</td>
+    <td class="mono">{{ f.version }} → <span class="ok">{{ f.resolved_version or '–' }}</span></td>
+    <td>{{ f.resolution or '–' }}</td>
+    <td class="muted" title="first seen {{ f.first_seen or '?' }}">{{ f.days_open if f.days_open is not none else '–' }} d</td>
+  </tr>{% else %}<tr><td colspan="8" class="muted">No patched findings in this range.</td></tr>{% endfor %}
+  </table>
+</div>
+<div class="card" style="flex:1">
+  <h2>Last patching per system</h2>
+  <table><tr><th>System</th><th>When</th><th>Findings</th></tr>
+  {% for h in last_per_host %}<tr><td>{{ h.name }}</td><td class="mono">{{ h.at[:16]|replace('T',' ') }}</td><td>{{ h.n }}</td></tr>
+  {% else %}<tr><td colspan="3" class="muted">No system has been patched since diysca started watching.</td></tr>{% endfor %}</table>
+  <h2 style="margin-top:14px">Patch activity in range</h2>
+  <table>{% for r in runs %}<tr><td class="mono">{{ r.at[:16]|replace('T',' ') }}</td><td><span class="tag">{{ r.kind }}</span> {{ r.summary }}</td></tr>
+  {% else %}<tr><td class="muted">No playbooks generated or repos updated in this range.</td></tr>{% endfor %}</table>
+</div>
+</div>
+{% endblock %}

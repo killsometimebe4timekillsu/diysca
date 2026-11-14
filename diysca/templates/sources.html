@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}CVE sources{% endblock %}
+{% block content %}
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+{% if err %}<div class="notice bad">{{ err }}</div>{% endif %}
+<div class="card"><h2>Built-in sources</h2>
+<table><tr><th>Source</th><th>Provides</th><th>URL</th><th>State</th><th>Last update</th></tr>
+{% for s in builtin %}<tr><td>{{ s.name }}</td><td>{{ s.kind }}</td><td class="mono">{{ s.url }}</td>
+<td class="{{ 'ok' if s.enabled else 'muted' }}">{{ s.info if s.enabled else 'disabled in config' }}</td><td class="mono">{{ (s.fetched_at or '–')[:16]|replace('T',' ') }}</td></tr>{% endfor %}
+</table></div>
+
+<div class="card"><h2>Extra sources</h2>
+<p class="muted">Every extra source is downloaded on its own schedule, converted to OSV records and matched with the same version logic as OSV data. Findings show which source reported them. Sources from <span class="mono">config.yml</span> can only be changed there.</p>
+<table><tr><th>Name</th><th>Type</th><th>URL / path</th><th>Records</th><th>Status</th><th>Last update</th><th>Every</th><th></th></tr>
+{% for s in extra %}<tr class="{{ 'muted' if not s.enabled }}">
+<td>{{ s.name }} {% if s.origin == 'config' %}<span class="tag">config.yml</span>{% endif %}</td>
+<td>{{ types.get(s.type, s.type) }}</td>
+<td class="mono">{{ s.cfg.url or s.cfg.path or default_urls.get(s.type, '') }}</td>
+<td>{{ s.count or 0 }}</td>
+<td class="{{ 'ok' if s.status=='ok' else 'bad' if s.status=='error' }}" title="{{ s.error or '' }}">{{ s.status or 'not loaded yet' }}{% if s.error %}: <small>{{ s.error[:120] }}</small>{% endif %}</td>
+<td class="mono">{{ (s.fetched_at or '–')[:16]|replace('T',' ') }}</td>
+<td>{{ s.cfg.refresh_hours or 24 }} h</td>
+<td style="white-space:nowrap">
+  <form method="post" action="/sources/{{ s.name }}/refresh" class="inline"><button class="secondary sm">Refresh</button></form>
+  {% if s.origin == 'ui' %}<form method="post" action="/sources/{{ s.name }}/toggle" class="inline"><button class="secondary sm">{{ 'Disable' if s.enabled else 'Enable' }}</button></form>
+  <form method="post" action="/sources/{{ s.name }}/delete" class="inline" onsubmit="return confirm('Remove {{ s.name }} and its records?')"><button class="danger sm">Remove</button></form>{% endif %}
+</td></tr>
+{% else %}<tr><td colspan="8" class="muted">No extra sources yet. Add one below or under <span class="mono">sources:</span> in config.yml.</td></tr>{% endfor %}
+</table></div>
+
+<div class="row">
+<div class="card"><h2>Add a source</h2>
+<form method="post" action="/sources" class="filters" style="flex-direction:column;align-items:stretch;max-width:640px">
+  <label>Name<input name="name" required pattern="[a-z0-9][a-z0-9_.\-]*" placeholder="debian-tracker"></label>
+  <label>Type<select name="type">{% for k, l in types.items() %}<option value="{{ k }}">{{ l }} ({{ k }})</option>{% endfor %}</select></label>
+  <label>URL or file:// path <input name="url" placeholder="empty = the type's default URL"></label>
+  <label>Refresh every (hours)<input name="refresh_hours" type="number" min="1" value="24"></label>
+  <label>Options (YAML)<textarea name="options" rows="9" placeholder="see the examples on the right"></textarea></label>
+  <div><button>Add and download</button></div>
+</form></div>
+<div class="card"><h2>Examples</h2>
+<p><b>Debian security tracker</b>: adds CVEs Debian hasn't fixed yet, with Debian's urgency. Releases default to the ones your hosts run.</p>
+<pre>releases: [bookworm, trixie]
+include_unimportant: false</pre>
+<p><b>Alpine secdb</b>: URL like <span class="mono">https://secdb.alpinelinux.org/v3.21/community.json</span>, no options needed.</p>
+<p><b>OSV-format feed</b>: a .zip, JSON list, NDJSON, or a local directory of OSV records (GHSA export, your own advisories).</p>
+<pre>path: /srv/advisories     # instead of a url (config.yml only)
+ecosystems: [npm, PyPI]   # only keep these
+headers: {Authorization: "Bearer …"}</pre>
+<p><b>Custom JSON / YAML / CSV</b>: map your feed's fields to diysca's.</p>
+<pre>format: json              # json | yaml | csv
+records: data.advisories  # where the list is
+fields:
+  id: advisory_id
+  aliases: cves           # list or "CVE-1, CVE-2"
+  package: product.name
+  ecosystem: product.ecosystem
+  fixed: fixed_in         # or versions / last_affected
+  introduced: since
+  severity: severity      # critical / high / ...
+  cvss: score             # number or CVSS:3.x vector
+  summary: title
+defaults:
+  ecosystem: "Debian:12"  # when the feed has no ecosystem</pre>
+<p><b>EPSS</b>: exploit probability per CVE, shown on findings. No options needed.</p>
+</div>
+</div>
+{% endblock %}

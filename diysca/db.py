@@ -85,9 +85,29 @@ CREATE TABLE IF NOT EXISTS findings (
   severity TEXT, cvss_score REAL, kev INTEGER DEFAULT 0,
   status TEXT DEFAULT 'open',        -- open | resolved | ignored
   first_seen TEXT, last_seen TEXT, resolved_at TEXT,
+  resolved_version TEXT,             -- installed version when the finding went away
+  resolution TEXT,                   -- upgraded | removed | not-affected
+  epss REAL,                         -- EPSS probability (0..1), when an epss source is configured
   UNIQUE(host_id, ecosystem, package, vuln_id)
 );
 CREATE INDEX IF NOT EXISTS ix_find_status ON findings(status);
+CREATE INDEX IF NOT EXISTS ix_find_resolved ON findings(resolved_at);
+CREATE TABLE IF NOT EXISTS patch_runs (    -- annotations: playbooks generated, repos updated
+  id INTEGER PRIMARY KEY, at TEXT NOT NULL, kind TEXT NOT NULL, summary TEXT
+);
+CREATE TABLE IF NOT EXISTS feed_sources (  -- extra vulnerability sources (config.yml or web UI)
+  name TEXT PRIMARY KEY, type TEXT NOT NULL, config TEXT NOT NULL,
+  origin TEXT DEFAULT 'ui',          -- config | ui
+  enabled INTEGER DEFAULT 1,
+  fetched_at TEXT, count INTEGER DEFAULT 0, status TEXT, error TEXT
+);
+CREATE TABLE IF NOT EXISTS advisories (    -- records from extra sources, stored in OSV format
+  source TEXT NOT NULL, ecosystem TEXT NOT NULL, package TEXT NOT NULL, id TEXT NOT NULL, raw TEXT NOT NULL,
+  PRIMARY KEY (source, ecosystem, package, id)
+);
+CREATE INDEX IF NOT EXISTS ix_adv_pkg ON advisories(package);
+CREATE INDEX IF NOT EXISTS ix_adv_id ON advisories(id);
+CREATE TABLE IF NOT EXISTS epss (cve TEXT PRIMARY KEY, score REAL, percentile REAL);
 CREATE TABLE IF NOT EXISTS channels (
   id INTEGER PRIMARY KEY, name TEXT UNIQUE NOT NULL,
   url TEXT NOT NULL,                 -- Apprise URL, e.g. ntfy://ntfy.sh/mytopic
@@ -116,7 +136,14 @@ CREATE TABLE IF NOT EXISTS events (
 );
 """
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+# columns added after a release: (table, column, type). Applied on SQLite and PostgreSQL.
+ADDED_COLUMNS = [
+    ("findings", "resolved_version", "TEXT"),
+    ("findings", "resolution", "TEXT"),
+    ("findings", "epss", "REAL"),
+]
 
 
 def _cols(c: sqlite3.Connection, table: str) -> set[str]:
@@ -149,6 +176,9 @@ def _migrate(c: sqlite3.Connection):
         c.execute(f"INSERT INTO findings({cols}) SELECT {cols} FROM findings_v1")
         c.execute("DROP TABLE findings_v1")
         c.execute("PRAGMA foreign_keys=ON")
+    for table, col, typ in ADDED_COLUMNS:
+        if _cols(c, table) and col not in _cols(c, table):
+            c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")
 
 
 _lock = threading.RLock()
@@ -235,6 +265,11 @@ def _connect_pg():
     c.raw.execute("SELECT pg_advisory_lock(4242)")  # one migrator at a time
     try:
         c.raw.execute("CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)")
+        for table, col, typ in ADDED_COLUMNS:  # before the schema, whose indexes may need them
+            exists = c.raw.execute("SELECT 1 FROM information_schema.tables WHERE table_name=%s", (table,)).fetchone()
+            if exists:
+                typ = "DOUBLE PRECISION" if typ == "REAL" else typ
+                c.raw.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS {col} {typ}")
         for stmt in pg_schema().split(";"):
             if stmt.strip():
                 c.raw.execute(stmt)
@@ -299,7 +334,7 @@ def x(sql: str, params=()) -> int | None:
         return None
 
 
-_ID_TABLES = {"hosts", "packages", "repos", "findings", "channels", "subscriptions", "saved_filters", "events"}
+_ID_TABLES = {"hosts", "packages", "repos", "findings", "channels", "subscriptions", "saved_filters", "events", "patch_runs"}
 
 
 def _has_id(sql: str) -> bool:
@@ -329,6 +364,11 @@ def tx():
 def event(kind: str, message: str):
     x("INSERT INTO events(at, kind, message) VALUES (?,?,?)", (now(), kind, message))
     x("DELETE FROM events WHERE id < (SELECT MAX(id) - 1000 FROM events)")
+
+
+def patch_run(kind: str, summary: str):
+    """Remember a patch action (playbook generated, repo updated); shown as an annotation on the Patched view."""
+    x("INSERT INTO patch_runs(at, kind, summary) VALUES (?,?,?)", (now(), kind, summary[:500]))
 
 
 def reset_for_tests():

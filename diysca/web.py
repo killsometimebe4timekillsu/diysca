@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.templating import Jinja2Templates
 
-from . import __version__, db, notify, patch, repomgr, scanner
+from . import __version__, db, notify, patch, patched, repomgr, scanner, sources
 from .config import settings
 from .feeds import SEVERITY_ORDER, sev_rank
 from .sbom import build_sbom, sbom_json
@@ -58,6 +58,7 @@ def render(request: Request, name: str, **ctx):
     ctx["page"] = page
     ctx["query_string"] = str(request.url.query)
     ctx["running"] = bool(scanner.running) or scanner._scan_lock.locked()
+    ctx["extra_source_names"] = ", ".join(r["name"] for r in db.q("SELECT name FROM feed_sources WHERE enabled=1 ORDER BY name"))
     return templates.TemplateResponse(request, name, ctx)
 
 
@@ -183,7 +184,9 @@ def dashboard(request: Request):
                            (SELECT COUNT(*) FROM findings WHERE status='open') open,
                            (SELECT COUNT(*) FROM findings WHERE status='open' AND fix_in_repo=1) fixable,
                            (SELECT COUNT(*) FROM findings WHERE status='open' AND kev=1) kev,
-                           (SELECT COUNT(DISTINCT vuln_id) FROM findings WHERE status='open') cves""")
+                           (SELECT COUNT(DISTINCT vuln_id) FROM findings WHERE status='open') cves,
+                           (SELECT COUNT(DISTINCT vuln_id) FROM findings WHERE status='resolved' AND resolved_at >= ?) patched_7d""",
+                  (patched.window("7d")[1],))
     top = db.q("""SELECT package, COUNT(DISTINCT vuln_id) cves, COUNT(DISTINCT host_id) hosts,
                   MAX(CASE severity WHEN 'CRITICAL' THEN 5 WHEN 'HIGH' THEN 4 WHEN 'MEDIUM' THEN 3 WHEN 'LOW' THEN 2 ELSE 1 END) worst
                   FROM findings WHERE status='open' GROUP BY package ORDER BY worst DESC, cves DESC LIMIT 15""")
@@ -266,6 +269,77 @@ def alerts(request: Request):
                   ORDER BY n.sent_at DESC LIMIT 50""")
     return render(request, "alerts.html", chans=chans, subs=subs, log=log, severities=SEVERITY_ORDER[2:],
                   groups=all_groups(), msg=request.query_params.get("msg"))
+
+
+@app.get("/patched")
+def patched_view(request: Request):
+    args = dict(request.query_params)
+    data = patched.query(args)
+    return render(request, "patched.html", args=args, groups=all_groups(), severities=SEVERITY_ORDER[2:],
+                  ranges=patched.RANGES, **data)
+
+
+def _builtin_sources() -> list[dict]:
+    bulk = db.q1("SELECT COUNT(*) n, MAX(fetched_at) at FROM osv_bulk_meta")
+    return [
+        {"name": "OSV.dev", "kind": f"vulnerabilities ({settings.osv_mode})",
+         "url": settings.osv_bulk_url if settings.osv_mode == "bulk" else settings.osv_url, "enabled": True,
+         "info": f"{bulk['n']} ecosystems mirrored" if settings.osv_mode == "bulk" else "queried per scan",
+         "fetched_at": bulk["at"] if settings.osv_mode == "bulk" else None},
+        {"name": "NVD", "kind": "CVSS scores", "url": settings.nvd_url, "enabled": settings.nvd_enabled,
+         "info": f"{db.q1('SELECT COUNT(*) n FROM nvd_cache')['n']} CVEs cached",
+         "fetched_at": db.q1("SELECT MAX(fetched_at) at FROM nvd_cache")["at"]},
+        {"name": "CISA KEV", "kind": "known exploited", "url": settings.kev_url, "enabled": settings.kev_enabled,
+         "info": f"{db.q1('SELECT COUNT(*) n FROM kev')['n']} CVEs", "fetched_at": None},
+    ]
+
+
+@app.get("/sources")
+def sources_view(request: Request):
+    sources.sync_config_sources()
+    return render(request, "sources.html", builtin=_builtin_sources(), extra=[sources.public(s) for s in sources.all_sources()],
+                  types=sources.TYPES, default_urls=sources.DEFAULT_URLS, msg=request.query_params.get("msg"),
+                  err=request.query_params.get("err"))
+
+
+@app.post("/sources")
+def add_source(name: str = Form(...), type: str = Form(...), url: str = Form(""), refresh_hours: str = Form("24"),
+               options: str = Form("")):
+    import yaml
+    try:
+        cfg = yaml.safe_load(options) or {} if options.strip() else {}
+        if not isinstance(cfg, dict):
+            raise ValueError("Options must be YAML key: value pairs.")
+        if url.strip():
+            cfg["url"] = url.strip()
+        cfg["refresh_hours"] = float(refresh_hours or 24)
+        sources.save(name.strip(), type, cfg)
+    except (ValueError, yaml.YAMLError) as e:
+        return RedirectResponse("/sources?" + urlencode({"err": str(e)}), 303)
+    _bg_run(sources.refresh(name.strip()))
+    return RedirectResponse("/sources?" + urlencode({"msg": f"Added {name}. Downloading it now."}), 303)
+
+
+@app.post("/sources/{name}/refresh")
+def refresh_source(name: str):
+    if not sources.get(name):
+        raise HTTPException(404)
+    _bg_run(sources.refresh(name))
+    return RedirectResponse("/sources?" + urlencode({"msg": f"Refreshing {name}. Reload in a moment."}), 303)
+
+
+@app.post("/sources/{name}/toggle")
+def toggle_source(name: str):
+    db.x("UPDATE feed_sources SET enabled=1-enabled WHERE name=? AND origin='ui'", (name,))
+    return RedirectResponse("/sources", 303)
+
+
+@app.post("/sources/{name}/delete")
+def delete_source(name: str):
+    s = sources.get(name)
+    if s and s["origin"] == "ui":
+        sources.remove(name)
+    return RedirectResponse("/sources", 303)
 
 
 # -------------------------------------------------------------- actions
@@ -430,8 +504,10 @@ async def patch_playbook(request: Request):
         ids = [r["id"] for r in db.q("SELECT id FROM findings WHERE host_id=? AND status='open'",
                                      (int(form.get("host_id")),))]
     text, summary = patch.build_playbook(ids)
-    db.event("patch", f"playbook generated: {summary['hosts']} hosts, {summary['packages']} packages, "
-                      f"{summary['manual']} manual items")
+    msg = f"playbook generated: {summary['hosts']} hosts, {summary['packages']} packages, {summary['manual']} manual items"
+    db.event("patch", msg)
+    if summary["hosts"]:
+        db.patch_run("playbook", msg)
     return Response(text, media_type="application/x-yaml",
                     headers={"Content-Disposition": 'attachment; filename="diysca-patch.yml"'})
 
@@ -475,6 +551,17 @@ def api_findings(request: Request):
     args.setdefault("status", "open")
     sql, p = finding_query(args)
     return rows(db.q(sql, p))
+
+
+@app.get("/api/patched")
+def api_patched(request: Request):
+    d = patched.query(dict(request.query_params))
+    return {"range": d["range"], "start": d["start"], "end": d["end"], "stats": d["stats"], "findings": rows(d["rows"])}
+
+
+@app.get("/api/sources")
+def api_sources():
+    return [sources.public(s) for s in sources.all_sources()]
 
 
 @app.get("/api/hosts/{host_id}/sbom")

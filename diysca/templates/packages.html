@@ -1,7 +1,6 @@
 {% extends "base.html" %}{% import "macros.html" as m %}
 {% block title %}Packages{% endblock %}
 {% block content %}
-<h1>Packages</h1>
 <div class="card">
 <form class="filters" method="get">
   <label>Package<input name="name" value="{{ args.name or '' }}" placeholder="postgresql*"></label>

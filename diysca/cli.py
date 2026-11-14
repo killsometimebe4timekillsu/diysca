@@ -78,6 +78,15 @@ def main(argv=None):
     s = sp.add_parser("notify", help="send pending alerts")
     s.add_argument("--dry-run", action="store_true")
 
+    s = sp.add_parser("sources", help="list or refresh the extra CVE sources (config.yml `sources:` / web UI)")
+    s.add_argument("--refresh", nargs="?", const="all", metavar="NAME", help="download now (all, or one source)")
+
+    s = sp.add_parser("patched", help="list patched CVEs in a time range")
+    s.add_argument("--range", default="last", help="last | 24h | 7d | 30d | 90d | 1y | custom")
+    s.add_argument("--from", dest="frm", default="", help="custom range start (YYYY-MM-DD)")
+    s.add_argument("--to", default="", help="custom range end (YYYY-MM-DD)")
+    s.add_argument("--host", default="")
+
     a = ap.parse_args(argv)
     if a.config:
         reload(a.config)
@@ -183,6 +192,8 @@ def main(argv=None):
         if a.host:
             rows = [r for r in rows if r["host_name"] in a.host]
         text, summary = patch.build_playbook([r["id"] for r in rows])
+        if summary["hosts"]:
+            db.patch_run("playbook", f"playbook generated (cli): {summary['hosts']} hosts, {summary['packages']} packages")
         if a.output:
             with open(a.output, "w") as fh:
                 fh.write(text)
@@ -202,6 +213,25 @@ def main(argv=None):
             sys.exit(1)
     elif a.cmd == "notify":
         print(f"sent {asyncio.run(notify.dispatch(dry_run=a.dry_run))} alerts")
+    elif a.cmd == "sources":
+        from . import sources
+        sources.sync_config_sources()
+        if a.refresh:
+            names = [s["name"] for s in sources.all_sources() if s["enabled"]] if a.refresh == "all" else [a.refresh]
+            for n in names:
+                print(asyncio.run(sources.refresh(n, force=True)))
+        for s in sources.all_sources():
+            print(f"{s['name']:<20} {s['type']:<15} {'on ' if s['enabled'] else 'off'} {s['origin']:<6} "
+                  f"{s['count'] or 0:>8} {s['status'] or 'not loaded'} {s['error'] or ''}")
+    elif a.cmd == "patched":
+        from . import patched
+        d = patched.query({"range": a.range, "from": a.frm, "to": a.to, "host": a.host})
+        st = d["stats"]
+        print(f"# {d['label']}: {st['cves']} CVEs / {st['findings']} findings patched on {st['systems']} systems, "
+              f"median {st['median_days']} days to patch")
+        for f in d["rows"]:
+            print(f"{f['resolved_at'][:16]}  {f['host_name']:<20} {f['severity'] or '':<8} {f['vuln_id']:<18} "
+                  f"{f['package']} {f['version']} -> {f['resolved_version'] or '-'} ({f['resolution'] or '?'})")
 
 
 if __name__ == "__main__":

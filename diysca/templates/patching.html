@@ -1,7 +1,6 @@
 {% extends "base.html" %}{% import "macros.html" as m %}
 {% block title %}Patching{% endblock %}
 {% block content %}
-<h1>Patching</h1>
 {% if result %}
 <div class="card"><h2>{{ 'Dry run' if result.dry_run else 'Run' }}: {{ result.manager }} <span class="{{ 'ok' if result.ok else 'bad' }}">{{ 'OK' if result.ok else 'FAILED' }}</span></h2>
 <table><tr><th>Step</th><th>Detail</th><th>Status</th><th>Info</th></tr>
