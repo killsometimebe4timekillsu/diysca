@@ -105,9 +105,13 @@ jobs:
       - name: smoke test (podman)
         run: |
           podman run -d --name diysca -p 8080:8080 diysca:ci
-          for i in $(seq 1 30); do curl -fsS localhost:8080/healthz && break; sleep 1; done
-          curl -fsS localhost:8080/findings >/dev/null
+          ok=
+          for i in $(seq 1 60); do curl -fsS localhost:8080/healthz && { ok=1; break; }; sleep 1; done
+          podman ps -a
           podman logs diysca
+          test -n "$ok"
+          curl -fsS localhost:8080/findings >/dev/null
+          podman exec diysca diysca --version
           podman rm -f diysca
       - name: push to ghcr.io
         if: github.event_name == 'push'
