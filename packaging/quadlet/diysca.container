@@ -1,0 +1,22 @@
+# Podman Quadlet: copy to /etc/containers/systemd/ (or ~/.config/containers/systemd/),
+# then: systemctl daemon-reload && systemctl start diysca
+[Unit]
+Description=diysca CVE scanner
+After=network-online.target
+
+[Container]
+Image=ghcr.io/killsometimebe4timekillsu/diysca:latest
+ContainerName=diysca
+PublishPort=127.0.0.1:8080:8080
+Volume=diysca-data:/data
+Volume=/etc/diysca:/config:ro,Z
+Volume=/etc/diysca/inventories:/inventories:ro,Z
+Volume=/etc/diysca/keys:/keys:ro,Z
+AutoUpdate=registry
+HealthCmd=python -c "import urllib.request;urllib.request.urlopen('http://localhost:8080/healthz')"
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target default.target

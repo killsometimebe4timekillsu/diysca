@@ -1,0 +1,8 @@
+#!/bin/sh
+# No arguments (double-click): start the UI on localhost and open the browser.
+# With arguments: behave like the diysca CLI, e.g. ./diysca.AppImage scan
+HERE="$(dirname "$(readlink -f "$0")")"
+if [ $# -eq 0 ]; then
+  exec "$HERE/usr/lib/diysca/diysca" desktop
+fi
+exec "$HERE/usr/lib/diysca/diysca" "$@"

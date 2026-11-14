@@ -1,0 +1,17 @@
+{% macro saved_bar(page, query_string, saved_filters) %}
+<div class="saved">
+  <span class="muted">Saved filters:</span>
+  {% for s in saved_filters %}
+    <span class="chip"><a href="/{{ page }}?{{ s.query }}">{{ s.name }}</a>
+      <form method="post" action="/filters/{{ s.id }}/delete" class="inline"><input type="hidden" name="back" value="/{{ page }}"><button title="delete">×</button></form></span>
+  {% else %}<span class="muted">none</span>{% endfor %}
+  {% if query_string %}
+  <form method="post" action="/filters" class="inline">
+    <input type="hidden" name="page" value="{{ page }}"><input type="hidden" name="query" value="{{ query_string }}">
+    <input name="name" placeholder="name this filter" required size="16"><button class="secondary">Save current filter</button>
+  </form>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro sev(s) %}<span class="sev {{ s or 'UNKNOWN' }}">{{ s or 'UNKNOWN' }}</span>{% endmacro %}

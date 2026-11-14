@@ -1,0 +1,4 @@
+#!/bin/sh
+# No arguments: start the UI on localhost and open the browser. Otherwise act as the CLI.
+if [ $# -eq 0 ]; then exec diysca desktop; fi
+exec diysca "$@"

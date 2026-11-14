@@ -1,0 +1,41 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<h1>Alerts</h1>
+{% if msg %}<div class="notice">{{ msg }}</div>{% endif %}
+<div class="row">
+<div class="card"><h2>Channels</h2>
+<table><tr><th>Name</th><th>URL</th><th></th></tr>
+{% for c in chans %}<tr><td>{{ c.name }}</td><td class="mono">{{ c.url.split('@')[-1] if '@' in c.url else c.url }}</td>
+<td style="white-space:nowrap"><form method="post" action="/channels/{{ c.id }}/test" class="inline"><button class="secondary">Test</button></form>
+<form method="post" action="/channels/{{ c.id }}/delete" class="inline"><button class="danger">Delete</button></form></td></tr>
+{% else %}<tr><td colspan="3" class="muted">No channels yet.</td></tr>{% endfor %}</table>
+<form method="post" action="/channels" class="filters" style="margin-top:10px">
+  <label>Name<input name="name" required placeholder="ntfy-ops"></label>
+  <label>Apprise URL<input name="url" required size="36" placeholder="ntfy://ntfy.sh/my-cve-topic"></label><button>Add channel</button></form>
+<p class="muted"><small>Any <a href="https://github.com/caronc/apprise/wiki" target="_blank">Apprise URL</a>: <span class="mono">ntfy://host/topic</span>, <span class="mono">ntfys://user:pass@host/topic</span>, <span class="mono">mailtos://user:pass@smtp.host?to=you@x</span>, <span class="mono">tgram://token/chat</span>, <span class="mono">gotifys://host/token</span>, <span class="mono">slack://…</span>, <span class="mono">matrixs://…</span>, <span class="mono">json://host/webhook</span></small></p>
+</div>
+<div class="card"><h2>Subscriptions</h2>
+<p class="muted"><small>Patterns are globs, comma separated; prefix with <span class="mono">!</span> to exclude. Hosts can be matched by group with <span class="mono">group:db*</span>. Package patterns match the source package and all installed binary packages.</small></p>
+<table><tr><th>Name</th><th>Systems</th><th>Packages</th><th>Min sev</th><th>Only</th><th>Channel</th><th></th></tr>
+{% for s in subs %}<tr class="{{ 'muted' if not s.enabled }}"><td>{{ s.name }}</td><td class="mono">{{ s.host_pattern }}</td><td class="mono">{{ s.package_pattern }}</td>
+<td>{{ m.sev(s.min_severity) }}</td><td>{{ 'KEV ' if s.only_kev }}{{ 'fixable' if s.only_fixable }}</td><td>{{ s.channel }}</td>
+<td style="white-space:nowrap"><form method="post" action="/subscriptions/{{ s.id }}/toggle" class="inline"><button class="secondary">{{ 'Pause' if s.enabled else 'Resume' }}</button></form>
+<form method="post" action="/subscriptions/{{ s.id }}/delete" class="inline"><button class="danger">Delete</button></form></td></tr>
+{% else %}<tr><td colspan="7" class="muted">No subscriptions. Nothing will be sent.</td></tr>{% endfor %}</table>
+{% if chans %}
+<form method="post" action="/subscriptions" class="filters" style="margin-top:10px">
+  <label>Name<input name="name" required placeholder="postgres prod"></label>
+  <label>Systems<input name="host_pattern" value="*" placeholder="group:prod,!test-*"></label>
+  <label>Packages<input name="package_pattern" value="*" placeholder="postgresql*,openssl"></label>
+  <label>Min severity<select name="min_severity">{% for s in severities %}<option {{ 'selected' if s=='HIGH' }}>{{ s }}</option>{% endfor %}</select></label>
+  <label>Channel<select name="channel_id">{% for c in chans %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></label>
+  <label><span><input type="checkbox" name="only_kev" value="1"> only known exploited</span></label>
+  <label><span><input type="checkbox" name="only_fixable" value="1"> only if fix is in my repos</span></label>
+  <button>Add subscription</button></form>
+{% endif %}
+<form method="post" action="/alerts/dispatch" style="margin-top:10px"><button class="secondary">Send pending alerts now</button></form>
+</div></div>
+<div class="card"><h2>Recently sent</h2><table><tr><th>When</th><th>Channel</th><th>System</th><th>Package</th><th>CVE</th><th>Result</th></tr>
+{% for l in log %}<tr><td class="mono">{{ l.sent_at }}</td><td>{{ l.channel }}</td><td>{{ l.host }}</td><td>{{ l.package }}</td><td>{{ l.vuln_id }}</td><td class="{{ 'ok' if l.ok else 'bad' }}">{{ 'ok' if l.ok else l.error }}</td></tr>{% endfor %}</table></div>
+{% endblock %}

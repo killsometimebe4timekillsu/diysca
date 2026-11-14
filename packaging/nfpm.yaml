@@ -1,0 +1,44 @@
+# Native packages (.deb, .rpm, also .apk/.archlinux) built from the standalone bundle.
+#   packaging/scripts/build-standalone.sh
+#   VERSION=0.1.0 nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+#   VERSION=0.1.0 nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
+name: diysca
+arch: ${ARCH}  # set ARCH=amd64|arm64
+platform: linux
+version: ${VERSION}
+release: 1
+section: admin
+priority: optional
+maintainer: diysca maintainers <noreply@users.noreply.github.com>
+description: |
+  Poor man's DIY CVE scanner. Agentless SSH scanning of dpkg/rpm/apk hosts,
+  repo-aware correlation with OSV, NVD and CISA KEV, CycloneDX SBOMs,
+  Apprise alerts (ntfy, mail, ...), Ansible inventory import, web UI.
+vendor: diysca
+homepage: https://github.com/killsometimebe4timekillsu/diysca
+license: MIT
+contents:
+  - src: dist/diysca
+    dst: /opt/diysca
+    type: tree
+  - src: /opt/diysca/diysca
+    dst: /usr/bin/diysca
+    type: symlink
+  - src: packaging/systemd/diysca.service
+    dst: /usr/lib/systemd/system/diysca.service
+  - src: packaging/systemd/diysca.sysusers
+    dst: /usr/lib/sysusers.d/diysca.conf
+  - src: packaging/systemd/diysca.default
+    dst: /etc/default/diysca
+    type: config|noreplace
+  - src: config.example.yml
+    dst: /etc/diysca/config.yml
+    type: config|noreplace
+    file_info:
+      mode: 0640
+  - src: README.md
+    dst: /usr/share/doc/diysca/README.md
+scripts:
+  postinstall: packaging/scripts/postinstall.sh
+  preremove: packaging/scripts/preremove.sh
+  postremove: packaging/scripts/postremove.sh

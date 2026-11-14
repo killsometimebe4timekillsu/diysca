@@ -1,0 +1,21 @@
+# kubectl apply -k packaging/k8s   (edit config.yml / secret first)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: diysca
+resources:
+  - namespace.yaml
+  - pvc.yaml
+  - deployment.yaml
+  - service.yaml
+configMapGenerator:
+  - name: diysca-config
+    files:
+      - config.yml
+  - name: diysca-inventory        # or mount your inventories from git-sync / another volume
+    files:
+      - hosts.ini
+secretGenerator:
+  - name: diysca-ssh
+    files:
+      - id_ed25519=secrets/id_ed25519
+      - known_hosts=secrets/known_hosts
