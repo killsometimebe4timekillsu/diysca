@@ -22,3 +22,13 @@
 <a href="{{ href }}" class="{{ 'on' if tab == key }}">{{ label }}</a>{% endfor %}
 </nav>
 {% endmacro %}
+
+{% macro view_tabs(page) %}
+{% set groups = {
+  'findings': ('Findings', [('findings','/findings','Findings'),('packages','/packages','Packages')]),
+  'patching': ('Patching', [('patching','/patching','Patch'),('patched','/patched','Patched CVEs')]) } %}
+{% set g = 'findings' if page in ('findings','packages') else 'patching' %}
+<nav class="tabs" aria-label="{{ groups[g][0] }}">
+{% for key, href, label in groups[g][1] %}<a href="{{ href }}" class="{{ 'on' if page == key }}">{{ label }}</a>{% endfor %}
+</nav>
+{% endmacro %}

@@ -1,6 +1,7 @@
 {% extends "base.html" %}{% import "macros.html" as m %}
 {% block title %}Packages{% endblock %}
 {% block content %}
+{{ m.view_tabs(page) }}
 <div class="card">
 <form class="filters" method="get">
   <label>Package<input name="name" value="{{ args.name or '' }}" placeholder="postgresql*"></label>

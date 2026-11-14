@@ -1,6 +1,7 @@
 {% extends "base.html" %}{% import "macros.html" as m %}
 {% block title %}Findings{% endblock %}
 {% block content %}
+{{ m.view_tabs(page) }}
 <div class="card">
 <form class="filters" method="get">
   <label>System<input name="host" value="{{ args.host or '' }}"></label>

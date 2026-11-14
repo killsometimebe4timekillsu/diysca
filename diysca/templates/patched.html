@@ -21,6 +21,7 @@
 </details>
 {% endblock %}
 {% block content %}
+{{ m.view_tabs(page) }}
 <div class="grid">
   <div class="stat"><span class="muted">CVEs patched</span><b class="ok">{{ stats.cves }}</b><small>{{ stats.findings }} findings</small></div>
   <div class="stat"><span class="muted">Systems patched</span><b>{{ stats.systems }}</b><small>{{ range == 'last' and 'each at its last patching' or label|lower }}</small></div>
