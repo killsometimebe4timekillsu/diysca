@@ -1,0 +1,37 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Findings{% endblock %}
+{% block content %}
+<h1>Findings</h1>
+<div class="card">
+<form class="filters" method="get">
+  <label>System<input name="host" value="{{ args.host or '' }}"></label>
+  <label>Group<select name="group"><option value="">any</option>{% for g in groups %}<option {{ 'selected' if args.group==g }}>{{ g }}</option>{% endfor %}</select></label>
+  <label>Package<input name="package" value="{{ args.package or '' }}" placeholder="openssl"></label>
+  <label>CVE / advisory<input name="cve" value="{{ args.cve or '' }}" placeholder="CVE-2025-"></label>
+  <label>Min severity<select name="severity"><option value="">any</option>{% for s in severities %}<option {{ 'selected' if args.severity==s }}>{{ s }}</option>{% endfor %}</select></label>
+  <label>Fix<select name="fix"><option value="">any</option>
+    <option value="repo" {{ 'selected' if args.fix=='repo' }}>available in my repos</option>
+    <option value="upstream" {{ 'selected' if args.fix=='upstream' }}>released, not in my repos</option>
+    <option value="none" {{ 'selected' if args.fix=='none' }}>no fix yet</option></select></label>
+  <label>Status<select name="status">{% for s in ['open','ignored','resolved','all'] %}<option {{ 'selected' if args.status==s }}>{{ s }}</option>{% endfor %}</select></label>
+  <label><span><input type="checkbox" name="kev" value="1" {{ 'checked' if args.kev }}> known exploited</span></label>
+  <button>Filter</button> <a href="/findings">reset</a>
+</form>
+{{ m.saved_bar(page, query_string, saved_filters) }}
+</div>
+<div class="card"><p class="muted">{{ rows|length }} findings · <a href="/api/findings?{{ query_string }}">JSON</a></p>
+<table><tr><th>Severity</th><th>CVE</th><th>System</th><th>Package</th><th>Installed</th><th>Fixed in</th><th>Your repos offer</th><th>Status</th><th></th></tr>
+{% for f in rows %}<tr>
+<td>{{ m.sev(f.severity) }} {% if f.cvss_score %}<span class="muted">{{ '%.1f'|format(f.cvss_score) }}</span>{% endif %} {% if f.kev %}<span class="kev">KEV</span>{% endif %}</td>
+<td><a href="/findings/{{ f.id }}">{{ f.vuln_id }}</a><br><small class="muted">{{ f.osv_ids.replace(',', ', ') if f.osv_ids and f.osv_ids != f.vuln_id }}</small></td>
+<td><a href="/systems/{{ f.host_id }}">{{ f.host_name }}</a></td>
+<td>{{ f.package }}<br><small class="muted">{{ f.binaries.replace(',', ', ') if f.binaries }}</small></td>
+<td class="mono">{{ f.version }}</td><td class="mono">{{ f.fixed_version or '–' }}</td>
+<td class="mono {{ 'ok' if f.fix_in_repo else ('bad' if f.fixed_version) }}">{{ f.repo_version or '–' }}{{ ' ✔' if f.fix_in_repo }}</td>
+<td>{{ f.status }}</td>
+<td><form method="post" action="/findings/{{ f.id }}/status" class="inline"><input type="hidden" name="back" value="/findings?{{ query_string }}">
+{% if f.status == 'ignored' %}<input type="hidden" name="status" value="open"><button class="secondary">Unignore</button>
+{% elif f.status == 'open' %}<input type="hidden" name="status" value="ignored"><button class="secondary">Ignore</button>{% endif %}</form></td>
+</tr>{% else %}<tr><td colspan="9" class="muted">No findings match.</td></tr>{% endfor %}
+</table></div>
+{% endblock %}

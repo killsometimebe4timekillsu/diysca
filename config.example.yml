@@ -1,0 +1,30 @@
+# Copy to config.yml. Every key can also be set as env var DIYSCA_<KEY> (e.g. DIYSCA_NVD_API_KEY).
+
+# Ansible inventories (files or directories). Re-read before every scan.
+inventories:
+  - /inventories/production/hosts.ini
+use_ansible_inventory_cli: true   # use `ansible-inventory --list` if installed (dynamic inventories, vault)
+
+# SSH (agentless). Per-host ansible_user / ansible_port / ansible_ssh_private_key_file win.
+ssh_user: diysca                  # an unprivileged user is enough, no sudo needed
+ssh_key: /keys/id_ed25519
+ssh_known_hosts: /keys/known_hosts  # or "ignore" (not recommended)
+scan_concurrency: 8
+scan_interval_hours: 12           # 0 = only scan on demand
+
+# Who downloads the package indexes of the repos configured on each host:
+#   scanner = this server (default) | host = the host itself via curl/wget over SSH
+#   (use "host" for internal mirrors only reachable from the host's network) | off
+repo_fetch: scanner
+
+# Vulnerability data
+osv_mode: api                     # api = api.osv.dev | bulk = mirror per-distro zip locally (works offline/air-gapped)
+# osv_bulk_url: https://osv-vulnerabilities.storage.googleapis.com   # or file:///mirror (expects <Ecosystem>/all.zip)
+nvd_enabled: true
+nvd_api_key: ""                   # free key from nvd.nist.gov makes enrichment ~10x faster
+kev_enabled: true
+
+# Web UI
+base_url: https://diysca.example.org   # used for links in alerts
+web_user: admin                   # set both to enable basic auth (put a TLS reverse proxy in front!)
+web_password: change-me

@@ -1,0 +1,30 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<div class="grid">
+  <a class="stat" href="/systems"><span class="muted">Systems</span><b>{{ stats.hosts }}</b></a>
+  <a class="stat" href="/packages"><span class="muted">Installed packages</span><b>{{ stats.packages }}</b></a>
+  <a class="stat" href="/findings"><span class="muted">Open findings</span><b>{{ stats.open }}</b></a>
+  <a class="stat" href="/findings"><span class="muted">Distinct CVEs</span><b>{{ stats.cves }}</b></a>
+  <a class="stat" href="/findings?severity=CRITICAL"><span class="muted">Critical</span><b class="bad">{{ sev.get('CRITICAL',0) }}</b></a>
+  <a class="stat" href="/findings?severity=HIGH"><span class="muted">High+</span><b>{{ sev.get('HIGH',0) + sev.get('CRITICAL',0) }}</b></a>
+  <a class="stat" href="/findings?fix=repo"><span class="muted">Fix in your repos</span><b class="ok">{{ stats.fixable }}</b></a>
+  <a class="stat" href="/findings?kev=1"><span class="muted">Known exploited</span><b>{{ stats.kev }}</b></a>
+</div>
+<div class="row">
+<div class="card"><h2>Systems</h2>
+<table><tr><th>System</th><th>OS</th><th>Open</th><th>High+</th><th>Fixable</th><th>Last scan</th></tr>
+{% for h in hosts %}<tr><td><a href="/systems/{{ h.id }}">{{ h.name }}</a></td><td>{{ h.os_pretty or '–' }}</td>
+<td><a href="/findings?host={{ h.name }}">{{ h.open_count }}</a></td><td>{{ h.high_count }}</td><td>{{ h.fixable_count }}</td>
+<td class="{{ 'bad' if h.last_status=='error' }}">{{ (h.last_scan or 'never')[:16] }} {{ h.last_status or '' }}</td></tr>
+{% else %}<tr><td colspan="6" class="muted">No systems yet. Add an Ansible inventory or a host on the <a href="/systems">Systems</a> page.</td></tr>{% endfor %}
+</table></div>
+<div class="card"><h2>Most affected packages</h2>
+<table><tr><th>Package</th><th>CVEs</th><th>Systems</th></tr>
+{% for t in top %}<tr><td><a href="/findings?package={{ t.package }}">{{ t.package }}</a></td><td>{{ t.cves }}</td><td>{{ t.hosts }}</td></tr>
+{% else %}<tr><td colspan="3" class="muted">Nothing found (yet).</td></tr>{% endfor %}</table></div>
+</div>
+<div class="card"><h2>Recent events</h2>
+<table>{% for e in events %}<tr><td class="muted mono" style="width:180px">{{ e.at[:19] }}</td><td>{{ e.kind }}</td><td>{{ e.message }}</td></tr>{% endfor %}</table></div>
+{% endblock %}

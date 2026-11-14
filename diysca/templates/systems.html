@@ -1,0 +1,42 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Systems{% endblock %}
+{% block content %}
+<h1>Systems</h1>
+<div class="card">
+<form class="filters" method="get">
+  <label>Name / address<input name="host" value="{{ args.host or '' }}" placeholder="web*"></label>
+  <label>Group<select name="group"><option value="">any</option>{% for g in groups %}<option {{ 'selected' if args.group==g }}>{{ g }}</option>{% endfor %}</select></label>
+  <label>OS<input name="os" value="{{ args.os or '' }}" placeholder="debian"></label>
+  <label>Status<select name="status"><option value="">any</option>{% for s in ['ok','partial','error'] %}<option {{ 'selected' if args.status==s }}>{{ s }}</option>{% endfor %}</select></label>
+  <button>Filter</button> <a href="/systems">reset</a>
+</form>
+{{ m.saved_bar(page, query_string, saved_filters) }}
+</div>
+<div class="card">
+<table><tr><th>System</th><th>Address</th><th>Groups</th><th>OS</th><th>Pkgs</th><th>Repos</th><th>Open</th><th>High+</th><th>Fix in repo</th><th>Last scan</th><th></th></tr>
+{% for h in hosts %}<tr>
+<td><a href="/systems/{{ h.id }}">{{ h.name }}</a>{% if not h.enabled %} <span class="tag">disabled</span>{% endif %}</td>
+<td class="mono">{{ h.ssh_user ~ '@' if h.ssh_user }}{{ h.address }}{{ ':' ~ h.port if h.port and h.port != 22 }} {% if h.connection=='local' %}<span class="tag">local</span>{% endif %}</td>
+<td>{% for g in (h.groups or '').split(',') if g %}<a class="tag" href="/systems?group={{ g }}">{{ g }}</a>{% endfor %}</td>
+<td>{{ h.os_pretty or '–' }}</td><td>{{ h.pkg_count }}</td><td>{{ h.repo_count }}</td>
+<td><a href="/findings?host={{ h.name }}">{{ h.open_count }}</a></td><td>{{ h.high_count }}</td><td>{{ h.fixable_count }}</td>
+<td class="{{ 'bad' if h.last_status=='error' }}" title="{{ h.last_error or '' }}">{{ (h.last_scan or 'never')[:16] }} {{ h.last_status or '' }}</td>
+<td style="white-space:nowrap"><form method="post" action="/systems/{{ h.id }}/scan" class="inline"><button class="secondary">Scan</button></form>
+<form method="post" action="/systems/{{ h.id }}/toggle" class="inline"><button class="secondary">{{ 'Disable' if h.enabled else 'Enable' }}</button></form></td>
+</tr>{% else %}<tr><td colspan="11" class="muted">No systems match.</td></tr>{% endfor %}
+</table></div>
+<div class="row">
+<div class="card"><h2>Import Ansible inventory</h2>
+<p class="muted">Configured: {{ inventories|join(', ') or 'none' }}. Configured inventories are re-read before every scan.</p>
+<form method="post" action="/inventory/import" class="filters">
+  <label>Inventory path (file or directory, on the scanner)<input name="path" size="40" placeholder="/inventories/production/hosts.yml"></label>
+  <button>Import</button></form></div>
+<div class="card"><h2>Add a system manually</h2>
+<form method="post" action="/systems" class="filters">
+  <label>Name<input name="name" required></label><label>Address<input name="address"></label>
+  <label>Port<input name="port" value="22" size="4"></label><label>SSH user<input name="ssh_user"></label>
+  <label>Groups<input name="groups" placeholder="db,prod"></label>
+  <label>Connection<select name="connection"><option>ssh</option><option>local</option></select></label>
+  <button>Add</button></form></div>
+</div>
+{% endblock %}

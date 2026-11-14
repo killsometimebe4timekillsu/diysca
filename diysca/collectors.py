@@ -1,0 +1,293 @@
+"""What we run on a host, and how we parse the output.
+
+Everything here is pure parsing so it can be unit tested without a host.
+No command needs root: package databases and repo config files are
+world-readable on all supported distros.
+"""
+from __future__ import annotations
+
+import re
+import shlex
+from dataclasses import dataclass, field
+
+# One shell script, sections separated by markers. Runs under plain /bin/sh.
+SEP = "@@DIYSCA@@"
+COLLECT_SCRIPT = f"""
+echo '{SEP}os-release'; cat /etc/os-release 2>/dev/null || cat /usr/lib/os-release 2>/dev/null
+echo '{SEP}hostname'; hostname 2>/dev/null || cat /etc/hostname
+echo '{SEP}arch'; uname -m
+echo '{SEP}kernel'; uname -r
+echo '{SEP}dpkg-arch'; command -v dpkg >/dev/null && dpkg --print-architecture
+echo '{SEP}dpkg'; command -v dpkg-query >/dev/null && dpkg-query -W -f='${{Package}}\\t${{Version}}\\t${{Architecture}}\\t${{Source}}\\t${{db:Status-Status}}\\n'
+echo '{SEP}rpm'; command -v rpm >/dev/null && rpm -qa --qf '%{{NAME}}\\t%{{EPOCHNUM}}\\t%{{VERSION}}\\t%{{RELEASE}}\\t%{{ARCH}}\\t%{{SOURCERPM}}\\n'
+echo '{SEP}apk'; [ -r /lib/apk/db/installed ] && cat /lib/apk/db/installed
+echo '{SEP}apt-sources'; for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do [ -r "$f" ] && echo "#FILE $f" && cat "$f"; done
+echo '{SEP}apt-deb822'; for f in /etc/apt/sources.list.d/*.sources; do [ -r "$f" ] && echo "#FILE $f" && cat "$f" && echo; done
+echo '{SEP}yum-repos'; for f in /etc/yum.repos.d/*.repo /etc/zypp/repos.d/*.repo; do [ -r "$f" ] && echo "#FILE $f" && cat "$f"; done
+echo '{SEP}apk-repos'; [ -r /etc/apk/repositories ] && cat /etc/apk/repositories
+echo '{SEP}end'
+"""
+
+
+@dataclass
+class Package:
+    name: str
+    version: str
+    arch: str = ""
+    source_name: str = ""
+    source_version: str = ""
+    type: str = "deb"  # deb | rpm | apk
+
+
+@dataclass
+class Repo:
+    kind: str  # apt | yum | apk
+    url: str
+    suite: str = ""
+    components: list[str] = field(default_factory=list)
+    name: str = ""
+    file: str = ""
+    enabled: bool = True
+
+    @property
+    def key(self) -> str:
+        return f"{self.kind}|{self.url}|{self.suite}|{' '.join(self.components)}"
+
+
+@dataclass
+class HostFacts:
+    os_id: str = ""
+    os_version: str = ""
+    os_pretty: str = ""
+    os_codename: str = ""
+    hostname: str = ""
+    arch: str = ""
+    deb_arch: str = ""
+    kernel: str = ""
+    packages: list[Package] = field(default_factory=list)
+    repos: list[Repo] = field(default_factory=list)
+
+    @property
+    def pkg_type(self) -> str:
+        return self.packages[0].type if self.packages else "deb"
+
+
+def split_sections(output: str) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    cur = None
+    buf: list[str] = []
+    for line in output.splitlines():
+        if line.startswith(SEP):
+            if cur is not None:
+                sections[cur] = "\n".join(buf)
+            cur, buf = line[len(SEP):].strip(), []
+        else:
+            buf.append(line)
+    if cur is not None:
+        sections[cur] = "\n".join(buf)
+    return sections
+
+
+def parse_os_release(text: str) -> dict[str, str]:
+    out = {}
+    for line in text.splitlines():
+        if "=" not in line or line.startswith("#"):
+            continue
+        k, v = line.split("=", 1)
+        try:
+            v = shlex.split(v)[0] if v.strip() else ""
+        except ValueError:
+            v = v.strip().strip('"')
+        out[k.strip()] = v
+    return out
+
+
+def parse_dpkg(text: str) -> list[Package]:
+    pkgs = []
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2 or not parts[0]:
+            continue
+        name, version = parts[0], parts[1]
+        arch = parts[2] if len(parts) > 2 else ""
+        source = parts[3] if len(parts) > 3 else ""
+        status = parts[4] if len(parts) > 4 else "installed"
+        if status and status not in ("installed", "half-configured", "unpacked"):
+            continue  # removed packages with leftover config ("config-files")
+        src_name, src_ver = name, version
+        if source:
+            m = re.match(r"^(\S+)(?:\s+\((.+)\))?$", source.strip())
+            if m:
+                src_name = m.group(1)
+                src_ver = m.group(2) or version
+        pkgs.append(Package(name, version, arch, src_name, src_ver, "deb"))
+    return pkgs
+
+
+def _srpm_name(srpm: str) -> str:
+    # bash-5.1.8-6.el9.src.rpm -> bash
+    s = re.sub(r"\.(no)?src\.rpm$", "", srpm)
+    parts = s.rsplit("-", 2)
+    return parts[0] if len(parts) == 3 else s
+
+
+def parse_rpm(text: str) -> list[Package]:
+    pkgs = []
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 4 or parts[0] == "gpg-pubkey":
+            continue
+        name, epoch, ver, rel = parts[:4]
+        arch = parts[4] if len(parts) > 4 else ""
+        srpm = parts[5] if len(parts) > 5 else ""
+        full = f"{ver}-{rel}"
+        if epoch and epoch not in ("0", "(none)"):
+            full = f"{epoch}:{full}"
+        src = _srpm_name(srpm) if srpm and srpm != "(none)" else name
+        pkgs.append(Package(name, full, arch, src, full, "rpm"))
+    return pkgs
+
+
+def parse_apk_db(text: str) -> list[Package]:
+    """Parse /lib/apk/db/installed or APKINDEX (same stanza format)."""
+    pkgs = []
+    cur: dict[str, str] = {}
+
+    def flush():
+        if cur.get("P") and cur.get("V"):
+            pkgs.append(Package(cur["P"], cur["V"], cur.get("A", ""), cur.get("o", cur["P"]), cur["V"], "apk"))
+
+    for line in text.splitlines():
+        if not line.strip():
+            flush()
+            cur = {}
+            continue
+        if len(line) > 2 and line[1] == ":":
+            cur.setdefault(line[0], line[2:])
+    flush()
+    return pkgs
+
+
+def parse_apt_sources(text: str) -> list[Repo]:
+    repos = []
+    fname = ""
+    for raw in text.splitlines():
+        if raw.startswith("#FILE "):
+            fname = raw[6:].strip()
+            continue
+        line = raw.split("#", 1)[0].strip()
+        if not line.startswith("deb ") and not line.startswith("deb\t"):
+            continue
+        line = re.sub(r"\[[^\]]*\]", "", line)  # drop [arch=amd64 signed-by=...]
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+        repos.append(Repo("apt", parts[1].rstrip("/"), parts[2], parts[3:], file=fname))
+    return repos
+
+
+def parse_deb822(text: str) -> list[Repo]:
+    repos = []
+    fname = ""
+    stanza: dict[str, str] = {}
+    last_key = None
+
+    def flush():
+        if not stanza:
+            return
+        if "deb" not in stanza.get("types", "").split():
+            return
+        if stanza.get("enabled", "yes").lower() == "no":
+            return
+        for uri in stanza.get("uris", "").split():
+            for suite in stanza.get("suites", "").split():
+                comps = stanza.get("components", "").split()
+                repos.append(Repo("apt", uri.rstrip("/"), suite, comps, file=fname))
+
+    for raw in text.splitlines() + [""]:
+        if raw.startswith("#FILE "):
+            flush()
+            stanza, fname = {}, raw[6:].strip()
+            continue
+        if raw.startswith("#"):
+            continue
+        if not raw.strip():
+            flush()
+            stanza = {}
+            continue
+        if raw[0] in " \t" and last_key:
+            stanza[last_key] += " " + raw.strip()
+            continue
+        if ":" in raw:
+            k, v = raw.split(":", 1)
+            last_key = k.strip().lower()
+            stanza[last_key] = v.strip()
+    return repos
+
+
+def parse_yum_repos(text: str) -> list[Repo]:
+    repos = []
+    fname = ""
+    cur: dict[str, str] | None = None
+    section = ""
+
+    def flush():
+        if cur is None:
+            return
+        url = cur.get("baseurl", "").split()[0] if cur.get("baseurl") else ""
+        enabled = cur.get("enabled", "1").strip() not in ("0", "false", "no")
+        if url or cur.get("mirrorlist") or cur.get("metalink"):
+            repos.append(Repo("yum", url.rstrip("/") or cur.get("mirrorlist") or cur.get("metalink", ""),
+                              name=cur.get("name", section), file=fname, enabled=enabled,
+                              suite=section))
+
+    for raw in text.splitlines():
+        if raw.startswith("#FILE "):
+            flush()
+            cur, fname = None, raw[6:].strip()
+            continue
+        line = raw.strip()
+        if not line or line.startswith("#") or line.startswith(";"):
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            flush()
+            section = line[1:-1]
+            cur = {}
+            continue
+        if cur is not None and "=" in line:
+            k, v = line.split("=", 1)
+            cur[k.strip().lower()] = v.strip()
+    flush()
+    return repos
+
+
+def parse_apk_repos(text: str) -> list[Repo]:
+    repos = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        tag = ""
+        if line.startswith("@"):
+            tag, line = line.split(None, 1)
+        repos.append(Repo("apk", line.rstrip("/"), name=tag))
+    return repos
+
+
+def parse_collect_output(output: str) -> HostFacts:
+    s = split_sections(output)
+    osr = parse_os_release(s.get("os-release", ""))
+    facts = HostFacts(
+        os_id=osr.get("ID", "").lower(),
+        os_version=osr.get("VERSION_ID", ""),
+        os_pretty=osr.get("PRETTY_NAME", ""),
+        os_codename=osr.get("VERSION_CODENAME", "") or osr.get("UBUNTU_CODENAME", ""),
+        hostname=s.get("hostname", "").strip(),
+        arch=s.get("arch", "").strip(),
+        deb_arch=s.get("dpkg-arch", "").strip(),
+        kernel=s.get("kernel", "").strip(),
+    )
+    facts.packages = parse_dpkg(s.get("dpkg", "")) or parse_rpm(s.get("rpm", "")) or parse_apk_db(s.get("apk", ""))
+    facts.repos = (parse_apt_sources(s.get("apt-sources", "")) + parse_deb822(s.get("apt-deb822", ""))
+                   + parse_yum_repos(s.get("yum-repos", "")) + parse_apk_repos(s.get("apk-repos", "")))
+    return facts
