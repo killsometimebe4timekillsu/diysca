@@ -2,7 +2,7 @@
 {% block title %}Settings{% endblock %}
 {% block content %}
 {{ m.settings_tabs(tab) }}
-<div class="card"><h2>Repo managers</h2>
+<div class="card"><h2>Repo Manager</h2>
 <p class="muted">Self-hosted repositories diysca may update when a fix is missing from your mirror. They are defined under <span class="mono">repo_managers:</span> in config.yml (see config.example.yml) because they hold credentials. Run them from <a href="/patching">Patching</a>.</p>
 {% for mg in mgrs %}<h2 style="margin-top:12px">{{ mg.name }} <span class="tag">{{ mg.type }}</span> <span class="muted mono">{{ mg.url }}</span></h2><pre>{{ mg.yaml }}</pre>
 {% else %}<p class="muted">None configured.</p>{% endfor %}

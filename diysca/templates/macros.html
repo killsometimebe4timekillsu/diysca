@@ -18,7 +18,7 @@
 
 {% macro settings_tabs(tab) %}
 <nav class="tabs" aria-label="Settings">
-{% for key, href, label in [('general','/settings','General'),('sources','/settings/sources','CVE sources'),('notifications','/settings/notifications','Notifications'),('repos','/settings/repos','Repo managers'),('backup','/settings/backup','Import / Export')] %}
+{% for key, href, label in [('general','/settings','General'),('sources','/settings/sources','CVE Sources'),('notifications','/settings/notifications','Notifications'),('repos','/settings/repos','Repo Manager'),('backup','/settings/backup','Import / Export')] %}
 <a href="{{ href }}" class="{{ 'on' if tab == key }}">{{ label }}</a>{% endfor %}
 </nav>
 {% endmacro %}
