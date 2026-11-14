@@ -1,0 +1,132 @@
+name: package
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  standalone:
+    name: native packages (deb, rpm) + AppImage
+    runs-on: ubuntu-22.04   # older glibc => binaries run on more distros
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: version
+        run: echo "VERSION=$(python -c 'import tomllib;print(tomllib.load(open("pyproject.toml","rb"))["project"]["version"])')" >> "$GITHUB_ENV"
+      - name: standalone bundle
+        run: PYTHON=python packaging/scripts/build-standalone.sh
+      - name: nfpm
+        run: |
+          curl -fsSL -o /tmp/nfpm.deb https://github.com/goreleaser/nfpm/releases/download/v2.41.1/nfpm_2.41.1_amd64.deb
+          sudo dpkg -i /tmp/nfpm.deb
+      - name: deb + rpm
+        run: |
+          ARCH=amd64 nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+          ARCH=amd64 nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
+      - name: AppImage
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq libfuse2
+          mkdir -p "$HOME/bin"
+          curl -fsSL -o "$HOME/bin/appimagetool" https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$HOME/bin/appimagetool"
+          PATH="$HOME/bin:$PATH" packaging/scripts/build-appimage.sh
+      - name: smoke test AppImage
+        run: |
+          APPIMAGE_EXTRACT_AND_RUN=1 ./dist/diysca-*.AppImage --version
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native
+          path: |
+            dist/*.deb
+            dist/*.rpm
+            dist/*.AppImage
+
+  test-deb:
+    needs: standalone
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: ["debian:12", "ubuntu:24.04"]
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: native }
+      - run: |
+          apt-get update -qq && apt-get install -y -qq ./diysca_*.deb
+          diysca --version
+          getent passwd diysca
+          test -f /etc/diysca/config.yml && test -f /usr/lib/systemd/system/diysca.service
+          DIYSCA_DATA_DIR=/tmp/d diysca add-host self --local
+          DIYSCA_DATA_DIR=/tmp/d DIYSCA_REPO_FETCH=off DIYSCA_NVD_ENABLED=0 DIYSCA_KEV_ENABLED=0 DIYSCA_OSV_MODE=bulk diysca scan --no-alerts
+
+  test-rpm:
+    needs: standalone
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        image: ["rockylinux:9", "almalinux:9"]
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { name: native }
+      - run: |
+          dnf install -y ./diysca-*.rpm
+          diysca --version
+          getent passwd diysca
+          DIYSCA_DATA_DIR=/tmp/d diysca add-host self --local
+          DIYSCA_DATA_DIR=/tmp/d DIYSCA_REPO_FETCH=off DIYSCA_NVD_ENABLED=0 DIYSCA_KEV_ENABLED=0 DIYSCA_OSV_MODE=bulk diysca scan --no-alerts
+
+  flatpak:
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: diysca.flatpak
+          manifest-path: packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+
+  oci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: build (buildah)
+        run: buildah bud --format oci -t diysca:ci -f Containerfile .
+      - name: smoke test (podman)
+        run: |
+          podman run -d --name diysca -p 8080:8080 diysca:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8080/healthz && break; sleep 1; done
+          curl -fsS localhost:8080/findings >/dev/null
+          podman logs diysca
+          podman rm -f diysca
+      - name: push to ghcr.io
+        if: github.event_name == 'push'
+        run: |
+          IMG=ghcr.io/${GITHUB_REPOSITORY,,}
+          TAG=${GITHUB_REF_NAME#v}; [ "$GITHUB_REF_TYPE" = tag ] || TAG=edge
+          echo "${{ secrets.GITHUB_TOKEN }}" | podman login ghcr.io -u "${{ github.actor }}" --password-stdin
+          podman tag diysca:ci "$IMG:$TAG"
+          podman push "$IMG:$TAG"
+          if [ "$GITHUB_REF_TYPE" = tag ]; then podman tag diysca:ci "$IMG:latest" && podman push "$IMG:latest"; fi
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [standalone, test-deb, test-rpm, flatpak, oci]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          generate_release_notes: true

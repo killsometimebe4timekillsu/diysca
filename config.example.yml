@@ -1,14 +1,19 @@
-# Copy to config.yml. Every key can also be set as env var DIYSCA_<KEY> (e.g. DIYSCA_NVD_API_KEY).
+# diysca configuration. Every key can also be set as env var DIYSCA_<KEY> (e.g. DIYSCA_NVD_API_KEY).
+# Location: native package /etc/diysca/config.yml · OCI image /config/config.yml
+#           AppImage/Flatpak/CLI ~/.config/diysca/config.yml (or ./config.yml, or $DIYSCA_CONFIG)
 
 # Ansible inventories (files or directories). Re-read before every scan.
-inventories:
-  - /inventories/production/hosts.ini
+inventories: []
+#  - /etc/ansible/hosts              # native package / AppImage / Flatpak
+#  - /inventories/hosts.ini          # OCI image (mount your inventories at /inventories)
 use_ansible_inventory_cli: true   # use `ansible-inventory --list` if installed (dynamic inventories, vault)
 
 # SSH (agentless). Per-host ansible_user / ansible_port / ansible_ssh_private_key_file win.
 ssh_user: diysca                  # an unprivileged user is enough, no sudo needed
-ssh_key: /keys/id_ed25519
-ssh_known_hosts: /keys/known_hosts  # or "ignore" (not recommended)
+# Defaults: ssh-agent and ~/.ssh/id_* + ~/.ssh/known_hosts of the user diysca runs as
+# (native package: /var/lib/diysca/.ssh/). For the OCI image mount them and set:
+# ssh_key: /keys/id_ed25519
+# ssh_known_hosts: /keys/known_hosts   # or "ignore" (not recommended)
 scan_concurrency: 8
 scan_interval_hours: 12           # 0 = only scan on demand
 
@@ -26,5 +31,5 @@ kev_enabled: true
 
 # Web UI
 base_url: https://diysca.example.org   # used for links in alerts
-web_user: admin                   # set both to enable basic auth (put a TLS reverse proxy in front!)
-web_password: change-me
+# web_user: admin                 # set both to enable basic auth (put a TLS reverse proxy in front!)
+# web_password: change-me

@@ -1,6 +1,6 @@
 # diysca: a poor man's DIY CVE scanner
 
-diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent, and it has no SaaS dependency.
+diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent, and it has no SaaS dependency. It ships as a native package (deb/rpm), an OCI image, an AppImage and a Flatpak.
 
 * **Public CVE sources:** [OSV.dev](https://osv.dev) is the main source. It aggregates the Debian, Ubuntu, Alpine, AlmaLinux, Rocky, SUSE and Red Hat security trackers, with exact fixed versions per distro release. **NVD** adds CVSS scores and descriptions, and **CISA KEV** flags known exploited CVEs.
 * **Local systems:** hosts are scanned agentless over SSH (or locally) for installed `dpkg`, `rpm` and `apk` packages. No root is needed.
@@ -19,23 +19,72 @@ Example alert:
 postgresql-16 16.6-1~deb12u1 installed on system_a affected by CVE-2025-1094 (HIGH 8.1), fixed in 16.7-0+deb12u1 - fix available in your repos
 ```
 
-## Quick start (Docker)
+## Install
+
+Every release ships the same app in four forms. Pick whichever fits your environment. None of them needs a system Python, and nothing is installed on the scanned hosts.
+
+| Format | For | Get it |
+|---|---|---|
+| **Native package** `.deb` / `.rpm` | a VM or bare-metal server; runs as a hardened systemd service | release assets |
+| **OCI image** | any standalone runtime (Podman, containerd/nerdctl, CRI-O, …) or an orchestrator (Kubernetes, Nomad, …) | `ghcr.io/killsometimebe4timekillsu/diysca` |
+| **AppImage** | a single file that runs on any x86_64 distro, no install | release assets |
+| **Flatpak** | sandboxed desktop install; double-click opens the UI in your browser | release assets (`diysca.flatpak`) |
+
+### Native package (Debian/Ubuntu, RHEL/Rocky/Alma/SUSE)
 
 ```bash
-cp config.example.yml config.yml        # edit: inventories, ssh key, ...
-mkdir -p data inventories && cp -r ~/ansible/inventory/* inventories/
-docker compose up -d --build
-open http://localhost:8080              # then "Scan all"
+sudo apt install ./diysca_0.1.0_amd64.deb        # or: sudo dnf install ./diysca-0.1.0-1.x86_64.rpm
+sudoedit /etc/diysca/config.yml                  # inventories, base_url, ...
+sudo -u diysca ssh-keygen -t ed25519 -f /var/lib/diysca/.ssh/id_ed25519 -N ''
+sudo systemctl enable --now diysca               # UI on 127.0.0.1:8080 (change in /etc/default/diysca)
 ```
 
-Create a dedicated SSH key, and put an unprivileged `diysca` user on your hosts (an Ansible one-liner is enough). Nothing else is installed on the hosts.
+The package installs to `/opt/diysca` and adds `/usr/bin/diysca`, a `diysca` system user, `/var/lib/diysca` for state, and `/etc/diysca/config.yml`.
 
-## Quick start (bare metal)
+### OCI image
 
 ```bash
-pip install .
+# Podman (rootless works):
+podman run -d --name diysca -p 8080:8080 \
+  -v diysca-data:/data -v ./config.yml:/config/config.yml:ro \
+  -v ./inventories:/inventories:ro -v ./keys:/keys:ro \
+  ghcr.io/killsometimebe4timekillsu/diysca:latest
+```
+
+* **systemd-managed Podman:** use the Quadlet in [`packaging/quadlet/diysca.container`](packaging/quadlet/diysca.container).
+* **Compose-spec tools** (`podman compose`, `nerdctl compose`, …): use [`compose.yaml`](compose.yaml).
+* **Kubernetes:** run `kubectl apply -k packaging/k8s` with the manifests in [`packaging/k8s/`](packaging/k8s). They use a non-root, read-only root filesystem, a PVC, and a ConfigMap and Secret for the config and SSH key.
+* **Building the image yourself:** `podman build -f Containerfile -t diysca .` works, as does `buildah bud`, or any other OCI builder.
+
+### AppImage
+
+```bash
+chmod +x diysca-0.1.0-x86_64.AppImage
+./diysca-0.1.0-x86_64.AppImage          # starts the UI on 127.0.0.1:8765 and opens your browser
+./diysca-0.1.0-x86_64.AppImage scan     # or use it as the CLI
+```
+
+### Flatpak
+
+```bash
+flatpak install --user ./diysca.flatpak
+flatpak run io.github.killsometimebe4timekillsu.diysca          # UI in your browser
+flatpak run io.github.killsometimebe4timekillsu.diysca scan     # CLI
+```
+
+The Flatpak sandbox can use the network and your ssh-agent, and has read-only access to your home directory for inventories and `known_hosts`.
+
+### First steps (any format)
+
+1. Create an unprivileged `diysca` user with your SSH key on the hosts you want to scan. An Ansible one-liner does it, and no sudo is needed.
+2. Run `diysca import /path/to/inventory`, or set `inventories:` in the config.
+3. Click **Scan all** in the UI, or run `diysca scan`.
+
+### CLI
+
+```bash
 diysca import ~/ansible/inventory/hosts.ini
-diysca add-host myself --local          # scan the box diysca runs on
+diysca add-host myself --local          # scan the machine diysca runs on
 diysca scan --no-alerts
 diysca findings
 diysca sbom system_a > system_a.cdx.json
@@ -44,6 +93,19 @@ diysca subscribe "postgres prod" --channel ntfy --hosts 'group:prod' --packages 
 diysca notify --dry-run
 diysca serve                            # UI + scheduler on :8080
 ```
+
+### Building the packages yourself
+
+```bash
+packaging/scripts/build-standalone.sh                                        # dist/diysca/ (PyInstaller bundle)
+ARCH=amd64 VERSION=0.1.0 nfpm package -f packaging/nfpm.yaml -p deb -t dist/ # .deb  (-p rpm for .rpm)
+packaging/scripts/build-appimage.sh                                          # needs appimagetool
+flatpak-builder --user --install --force-clean build/flatpak packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.yml
+```
+
+CI (`.github/workflows/package.yml`) builds and install-tests every format on each PR. A `v*` tag publishes a GitHub release and the OCI image.
+
+Config is looked up in this order: `$DIYSCA_CONFIG`, then `./config.yml`, then `~/.config/diysca/config.yml`, then `/etc/diysca/config.yml`. State goes to systemd's `StateDirectory` (`/var/lib/diysca`), or to `$XDG_DATA_HOME/diysca` otherwise.
 
 ## How it works
 
@@ -83,5 +145,5 @@ Supported distros: Debian, Ubuntu, Alpine, Rocky, AlmaLinux, openSUSE Leap/SLES,
 
 * yum/dnf repos that only use `mirrorlist` or `metalink` are not indexed (set `baseurl`).
 * NVD without an API key is slow (about 5 CVEs per 30 s). Get a free key.
-* Language packages (pip, npm, gems, jars) and containers are not scanned yet. OSV supports them, so this is a natural next step.
+* Language packages (pip, npm, gems, jars) and container images are not scanned yet. OSV supports them, so this is a natural next step.
 * **Patching** (the "patchor" half): generate an Ansible playbook that upgrades the selected findings to the repo candidate version.

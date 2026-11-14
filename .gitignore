@@ -5,3 +5,12 @@ data/
 config.yml
 .venv/
 .pytest_cache/
+build/
+dist/
+*.AppImage
+*.deb
+*.rpm
+*.flatpak
+packaging/k8s/secrets/*
+!packaging/k8s/secrets/README
+!packaging/k8s/config.yml

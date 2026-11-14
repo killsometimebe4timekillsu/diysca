@@ -23,6 +23,9 @@ def main(argv=None):
     s.add_argument("--host", default="0.0.0.0")
     s.add_argument("--port", type=int, default=8080)
 
+    s = sp.add_parser("desktop", help="run the UI on localhost and open it in the browser (AppImage/Flatpak launcher)")
+    s.add_argument("--port", type=int, default=8765)
+
     s = sp.add_parser("scan", help="scan hosts now")
     s.add_argument("hosts", nargs="*", help="host names (default: all enabled)")
     s.add_argument("--no-alerts", action="store_true")
@@ -73,7 +76,21 @@ def main(argv=None):
 
     if a.cmd == "serve":
         import uvicorn
-        uvicorn.run("diysca.web:app", host=a.host, port=a.port, proxy_headers=True)
+
+        from .web import app
+        uvicorn.run(app, host=a.host, port=a.port, proxy_headers=True)
+    elif a.cmd == "desktop":
+        import threading
+        import webbrowser
+
+        import uvicorn
+
+        from .web import app
+        url = f"http://127.0.0.1:{a.port}/"
+        settings.base_url = url.rstrip("/")
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
+        print(f"diysca UI on {url} (Ctrl+C to quit)")
+        uvicorn.run(app, host="127.0.0.1", port=a.port)
     elif a.cmd == "scan":
         ids = None
         if settings.inventories:

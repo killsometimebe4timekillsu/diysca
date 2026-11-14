@@ -1,0 +1,7 @@
+inventories: [/inventories/hosts.ini]
+use_ansible_inventory_cli: false
+ssh_user: diysca
+ssh_key: /keys/id_ed25519
+ssh_known_hosts: /keys/known_hosts
+osv_mode: bulk
+base_url: https://diysca.example.org

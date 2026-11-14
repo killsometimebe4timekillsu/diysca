@@ -1,0 +1,3 @@
+# Overrides for the diysca systemd service
+DIYSCA_LISTEN=127.0.0.1
+DIYSCA_PORT=8080

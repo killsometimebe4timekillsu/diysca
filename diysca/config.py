@@ -10,7 +10,7 @@ import yaml
 
 @dataclass
 class Settings:
-    data_dir: str = "./data"
+    data_dir: str = ""  # default: $STATE_DIRECTORY (systemd) or $XDG_DATA_HOME/diysca
     db_path: str = ""  # default: <data_dir>/diysca.db
     inventories: list[str] = field(default_factory=list)  # Ansible inventory files/dirs
     use_ansible_inventory_cli: bool = True
@@ -41,9 +41,28 @@ class Settings:
     web_password: str = ""
     base_url: str = "http://localhost:8080"
 
+    def __post_init__(self):
+        if not self.data_dir:
+            self.data_dir = default_data_dir()
+
     @property
     def database(self) -> str:
         return self.db_path or str(Path(self.data_dir) / "diysca.db")
+
+
+def default_data_dir() -> str:
+    if os.environ.get("STATE_DIRECTORY"):  # systemd StateDirectory=
+        return os.environ["STATE_DIRECTORY"].split(":")[0]
+    xdg = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    return os.path.join(xdg, "diysca")
+
+
+def default_config_path() -> str | None:
+    xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    for p in ("config.yml", os.path.join(xdg, "diysca", "config.yml"), "/etc/diysca/config.yml"):
+        if Path(p).exists():
+            return p
+    return None
 
 
 def _coerce(t, v):
@@ -60,7 +79,7 @@ def _coerce(t, v):
 
 def load_settings(path: str | None = None) -> Settings:
     s = Settings()
-    path = path or os.environ.get("DIYSCA_CONFIG") or ("config.yml" if Path("config.yml").exists() else None)
+    path = path or os.environ.get("DIYSCA_CONFIG") or default_config_path()
     if path and Path(path).exists():
         data = yaml.safe_load(Path(path).read_text()) or {}
         for f in fields(s):

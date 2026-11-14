@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: diysca
+  labels: { app: diysca }
+spec:
+  replicas: 1                 # SQLite: exactly one writer
+  strategy: { type: Recreate }
+  selector:
+    matchLabels: { app: diysca }
+  template:
+    metadata:
+      labels: { app: diysca }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: diysca
+          image: ghcr.io/killsometimebe4timekillsu/diysca:latest
+          ports: [{ containerPort: 8080, name: http }]
+          env:
+            - { name: DIYSCA_CONFIG, value: /config/config.yml }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: config, mountPath: /config, readOnly: true }
+            - { name: inventory, mountPath: /inventories, readOnly: true }
+            - { name: ssh, mountPath: /keys, readOnly: true }
+            - { name: tmp, mountPath: /tmp }
+          readinessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /healthz, port: http }, periodSeconds: 30 }
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 1Gi }
+      volumes:
+        - { name: data, persistentVolumeClaim: { claimName: diysca-data } }
+        - { name: config, configMap: { name: diysca-config } }
+        - { name: inventory, configMap: { name: diysca-inventory } }
+        - { name: ssh, secret: { secretName: diysca-ssh, defaultMode: 0400 } }
+        - { name: tmp, emptyDir: {} }

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="console-application">
+  <id>io.github.killsometimebe4timekillsu.diysca</id>
+  <name>diysca</name>
+  <summary>Poor man's DIY CVE scanner</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <description>
+    <p>Agentless SSH scanning of Linux hosts, repo-aware correlation with OSV, NVD and CISA KEV,
+    CycloneDX SBOMs, Apprise alerts (ntfy, mail, ...), Ansible inventory import and a web UI.</p>
+  </description>
+  <url type="homepage">https://github.com/killsometimebe4timekillsu/diysca</url>
+  <provides><binary>diysca</binary></provides>
+  <releases><release version="0.1.0" date="2026-11-14"/></releases>
+</component>

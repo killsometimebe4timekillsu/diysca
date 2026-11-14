@@ -1,0 +1,32 @@
+# Build:   flatpak-builder --user --install --force-clean build/flatpak packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.yml
+# Bundle:  flatpak build-bundle ~/.local/share/flatpak/repo dist/diysca.flatpak io.github.killsometimebe4timekillsu.diysca
+# Run:     flatpak run io.github.killsometimebe4timekillsu.diysca            (opens the UI in your browser)
+#          flatpak run io.github.killsometimebe4timekillsu.diysca scan       (CLI)
+app-id: io.github.killsometimebe4timekillsu.diysca
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: diysca-launcher
+finish-args:
+  - --share=network          # scan hosts over SSH, fetch CVE feeds and repo indexes
+  - --socket=ssh-auth        # use your running ssh-agent for host keys
+  - --filesystem=home:ro     # read Ansible inventories and ~/.ssh/known_hosts
+modules:
+  - name: diysca
+    buildsystem: simple
+    build-options:
+      build-args:
+        - --share=network    # pip downloads wheels at build time (self-built bundle, not Flathub)
+    build-commands:
+      - pip3 install --prefix=/app --no-cache-dir '.[zstd]'
+      - install -Dm755 packaging/flatpak/diysca-launcher /app/bin/diysca-launcher
+      - install -Dm644 packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.desktop /app/share/applications/io.github.killsometimebe4timekillsu.diysca.desktop
+      - install -Dm644 packaging/diysca.svg /app/share/icons/hicolor/scalable/apps/io.github.killsometimebe4timekillsu.diysca.svg
+      - install -Dm644 packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.metainfo.xml /app/share/metainfo/io.github.killsometimebe4timekillsu.diysca.metainfo.xml
+    sources:
+      - type: dir
+        path: ../..
+        skip:
+          - build
+          - dist
+          - .git

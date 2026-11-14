@@ -1,0 +1,12 @@
+# Compose spec: works with "podman compose", "nerdctl compose", "docker compose", ...
+services:
+  diysca:
+    image: ghcr.io/killsometimebe4timekillsu/diysca:latest
+    build: { context: ., dockerfile: Containerfile }
+    restart: unless-stopped
+    ports: ["8080:8080"]
+    volumes:
+      - ./data:/data                      # SQLite DB + OSV mirror (must be writable by uid 10001)
+      - ./config.yml:/config/config.yml:ro
+      - ./inventories:/inventories:ro     # your Ansible inventories
+      - ./keys:/keys:ro                   # id_ed25519 + known_hosts

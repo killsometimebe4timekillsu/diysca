@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=diysca
+GenericName=CVE scanner
+Comment=Poor man's DIY CVE scanner
+Exec=diysca
+Icon=diysca
+Terminal=true
+Categories=System;Security;Network;
