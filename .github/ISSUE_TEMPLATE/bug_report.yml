@@ -1,0 +1,111 @@
+name: Bug report
+description: Something in diysca doesn't work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. **Security problems** (anything an attacker could use) don't belong here:
+        please report them privately, see [SECURITY.md](https://github.com/killsometimebe4timekillsu/diysca/blob/main/SECURITY.md).
+
+        Before you paste logs or config, remove passwords, tokens, API keys, host names and IP addresses you
+        don't want to make public.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What did you do, what did you expect, and what happened instead?
+      placeholder: |
+        I ran `diysca scan web1` and expected ..., but ...
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add a host with ...
+        2. Open Findings and filter by ...
+        3. See error
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: diysca version
+      description: Output of `diysca --version`, or the version in the UI footer.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How is diysca installed?
+      options:
+        - Native package (.deb / .rpm)
+        - OCI image (Podman, containerd, CRI-O, ...)
+        - OCI image on Kubernetes / OpenShift / Nomad
+        - AppImage
+        - Flatpak
+        - From source (pip)
+    validations:
+      required: true
+  - type: dropdown
+    id: database
+    attributes:
+      label: Database
+      options:
+        - PostgreSQL
+        - SQLite
+        - Don't know
+  - type: input
+    id: server-os
+    attributes:
+      label: OS diysca runs on
+      placeholder: "Debian 13"
+  - type: input
+    id: target-os
+    attributes:
+      label: OS of the scanned system(s), if the problem is about a scan
+      placeholder: "Rocky Linux 9, Ubuntu 24.04, ..."
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      multiple: true
+      options:
+        - Scanning (SSH, packages, repos)
+        - Language packages / containers / PHP / Apache
+        - Inventory (Ansible, providers)
+        - Findings / CVE sources / NVD / OSV
+        - Alerts
+        - Patching / playbooks / repo manager
+        - Mitigations / hand-off / patch log
+        - Login / roles / OIDC
+        - API / MCP / CLI
+        - Web UI
+        - Installation / packaging
+        - Other
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        `journalctl -u diysca -n 200`, `podman logs diysca` or the CLI output. For scan problems, the system's
+        "last error" from the Systems page helps a lot. Please remove secrets first.
+      render: text
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant config
+      description: The parts of config.yml that matter, with secrets removed.
+      render: yaml
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched the existing issues.
+          required: true
+        - label: I removed passwords, tokens and keys from what I pasted.
+          required: true
