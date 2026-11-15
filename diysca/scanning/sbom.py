@@ -7,6 +7,7 @@ from urllib.parse import quote
 
 from diysca import __version__
 from diysca.core import db
+from diysca.scanning.describe import UPGRADE_TOOL
 
 PURL_TYPE = {"deb": "deb", "rpm": "rpm", "apk": "apk"}
 LANG_PURL = {"PyPI": "pypi", "npm": "npm", "RubyGems": "gem", "Maven": "maven", "Packagist": "composer",
@@ -82,7 +83,8 @@ def build_sbom(host_id: int) -> dict:
         }
         if f["fixed_version"]:
             entry["recommendation"] = f"Upgrade {f['package']} to {f['fixed_version']}" + (
-                " (available in configured repos)" if f["fix_in_repo"] else " (not yet in configured repos)")
+                f" (via {UPGRADE_TOOL.get(f['ecosystem'], f['ecosystem'])})" if f["ecosystem"] and f["ecosystem"] != "Apache"
+                else " (available in configured repos)" if f["fix_in_repo"] else " (not yet in configured repos)")
         if f["osv_ids"]:
             entry["advisories"] = [{"title": i, "url": f"https://osv.dev/vulnerability/{i}"}
                                    for i in f["osv_ids"].split(",") if i]

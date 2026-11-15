@@ -92,6 +92,9 @@ sudo ln -s /opt/diysca/bin/diysca /usr/local/bin/diysca   # so `diysca` is on th
 diysca serve                                              # UI on 127.0.0.1:8080
 ```
 
+To update a source install to the latest commit, add `--force-reinstall --no-deps` (the version number only
+changes with releases, so a plain `--upgrade` sees nothing to do), then `sudo systemctl restart diysca` if you run it as a service.
+
 Config: `--config /etc/diysca/config.yml` or `DIYSCA_CONFIG`; copy `config.example.yml` to start. For PostgreSQL set `database_url`. The packages above set all of this up for you (system user, systemd unit, config).
 
 ### AppImage
@@ -246,7 +249,7 @@ GitHub Actions and GitLab CI examples: [docs/mitigations.md](docs/mitigations.md
 ## Known limitations / roadmap
 
 * yum/dnf repos that only use `mirrorlist` or `metalink` are not indexed (set `baseurl`).
-* NVD without an API key is slow (about 5 CVEs per 30 s), so CVSS scores from NVD fill in over several runs. Scans don't wait for it. Get a free key.
+* NVD without an API key is slow (about 5 CVEs per 30 s), so CVSS scores from NVD fill in over several runs. Scans don't wait for it. A free key makes it about 10x faster: [docs/nvd-api-key.md](docs/nvd-api-key.md).
 * Images without `/bin/sh` (distroless, scratch) can't be scanned through `exec`.
 * Language packages are reported with a fix version and their location. Upgrading them is left to the application's own build, and the playbook lists them as manual items.
 * Fat jars that nest other jars are only read one level deep.
