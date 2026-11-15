@@ -130,7 +130,7 @@ Variables: `DIYSCA_MITIGATION_ID`, `DIYSCA_HOSTS`, `DIYSCA_PLAYBOOK_URL`, `DIYSC
 ```json
 {
   "event": "mitigation.approved",
-  "diysca": "0.2.0",
+  "diysca": "0.2.1",
   "mitigation": {"id": 12, "status": "approved", "created_at": "2026-11-14T22:10:00+00:00", "approved_by": "alice",
                  "note": "CHG-1234", "hosts": ["db1", "web1"],
                  "summary": {"findings": 7, "hosts": ["db1", "web1"], "worst_severity": "CRITICAL", "kev": 1,
