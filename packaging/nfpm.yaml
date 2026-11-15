@@ -1,7 +1,7 @@
 # Native packages (.deb, .rpm, also .apk/.archlinux) built from the standalone bundle.
 #   packaging/scripts/build-standalone.sh
-#   VERSION=0.2.0 nfpm package -f packaging/nfpm.yaml -p deb -t dist/
-#   VERSION=0.2.0 nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
+#   VERSION=0.2.1 nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+#   VERSION=0.2.1 nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
 name: diysca
 arch: ${ARCH}  # set ARCH=amd64|arm64
 platform: linux

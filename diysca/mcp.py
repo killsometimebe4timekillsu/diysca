@@ -204,7 +204,7 @@ async def call(name: str, args: dict, ctx: Context):
         m, rescan = mitigate.report(int(a["id"]), str(a["status"]), ctx.actor, str(a.get("log") or ""))
         if rescan:
             _bg(scanner.scan_all(host_ids=rescan))
-        return {**m, "rescan_hosts": rescan}
+        return {**m, "rescan_hosts": mitigate.host_names(rescan)}
     if name == "patch_log":
         from diysca.mitigation import patchlog
         d = patchlog.query({k: str(v) for k, v in a.items()})

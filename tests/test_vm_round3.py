@@ -58,3 +58,19 @@ def test_empty_filter_message(monkeypatch, capsys):
     cli.main()
     err = capsys.readouterr().err
     assert "no open findings match the filter 'cve=CVE-0000-0' on system_a" in err and "open findings in total" in err
+
+
+def test_report_names_the_rescanned_systems_and_counts_all_cves(monkeypatch):
+    monkeypatch.setattr(settings, "allow_no_login", True)
+    _scan(monkeypatch)
+    from diysca.scanning import scanner
+    from diysca.web import app
+
+    async def no_scan(**kw):
+        return []
+    monkeypatch.setattr(scanner, "scan_all", no_scan)
+    m = mitigate.approve(_open_ids(), "alice")
+    assert m["summary"]["cves_total"] == len({f["vuln_id"] for f in m["findings"]}) >= len(m["summary"]["cves"]) > 0
+    assert "<this file> --check --diff" in m["playbook"] and "diysca-patch.yml" not in m["playbook"]
+    r = TestClient(app).post(f"/api/mitigations/{m['id']}/report", json={"status": "done"})
+    assert r.status_code == 200 and r.json()["rescan_hosts"] == ["system_a"]

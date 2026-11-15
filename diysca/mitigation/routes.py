@@ -313,7 +313,7 @@ async def api_mitigation_report(request: Request, mid: int):
         raise HTTPException(409, str(e))
     if rescan:
         _bg_run(scanner.scan_all(host_ids=rescan))
-    return {**m, "rescan_hosts": rescan}
+    return {**m, "rescan_hosts": mitigate.host_names(rescan)}
 
 
 @router.post("/api/mitigations/{mid}/cancel", tags=["mitigations"], summary="Cancel a mitigation")

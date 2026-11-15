@@ -155,6 +155,7 @@ def _approve(finding_ids, approved_by, note, handoff, rescan, filter) -> dict:
     worst = max((r["severity"] or "UNKNOWN" for r in rows), key=sev_rank)
     summary = {"findings": len(rows), "hosts": sorted({r["host"] for r in rows}), "worst_severity": worst,
                "kev": sum(1 for r in rows if r["kev"]), "cves": sorted({r["vuln_id"] for r in rows})[:50],
+               "cves_total": len({r["vuln_id"] for r in rows}),  # `cves` holds the first 50 only
                "playbook_hosts": pb["hosts"], "playbook_packages": pb["packages"], "manual_items": pb["manual"]}
     ts = db.now()
     mid = db.x("""INSERT INTO mitigations(created_at, approved_by, note, status, handoff, updated_at, playbook, summary,
@@ -170,6 +171,14 @@ def _approve(finding_ids, approved_by, note, handoff, rescan, filter) -> dict:
     for t in targets:
         deliver(mid, t)
     return get(mid)
+
+
+def host_names(host_ids: list[int]) -> list[str]:
+    """Names for the host ids `report` returns, for API answers (the API speaks in system names)."""
+    if not host_ids:
+        return []
+    marks = ",".join("?" * len(host_ids))
+    return sorted(r["name"] for r in db.q(f"SELECT name FROM hosts WHERE id IN ({marks})", list(host_ids)))
 
 
 def _append_log(mid: int, line: str):
