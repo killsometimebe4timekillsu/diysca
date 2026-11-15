@@ -223,7 +223,7 @@ targets marked *send every approval* get it; with none, agents pull it. Tokens g
 ```
 
 `status` is `running`, `done` or `failed`. `log` is appended to the mitigation's log (up to 20,000 characters per
-report). On `done` the response has `rescan_hosts`: the systems being rescanned. `409` if the mitigation is
+report). On `done` the response has `rescan_hosts`: the names of the systems being rescanned. `409` if the mitigation is
 already done or cancelled.
 
 **POST /api/mitigations/{id}/cancel** optional `{"reason": "…"}`. The findings can be approved again. Tokens
