@@ -1,9 +1,13 @@
 import os
 
-import pytest
+# Settings are read when diysca is imported. Without this, a config.yml in the working directory, in
+# ~/.config/diysca or in /etc/diysca (a machine that runs diysca) leaks its login and database into the tests.
+os.environ["DIYSCA_CONFIG"] = os.devnull
 
-from diysca.core import db
-from diysca.core.config import settings
+import pytest  # noqa: E402
+
+from diysca.core import db  # noqa: E402
+from diysca.core.config import settings  # noqa: E402
 
 # Run the suite against PostgreSQL with: DIYSCA_TEST_DATABASE_URL=postgresql://... pytest
 PG_URL = os.environ.get("DIYSCA_TEST_DATABASE_URL", "")
