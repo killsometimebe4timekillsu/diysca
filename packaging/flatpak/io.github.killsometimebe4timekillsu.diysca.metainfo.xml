@@ -4,7 +4,7 @@
   <name>diysca</name>
   <summary>Poor man's DIY CVE scanner</summary>
   <metadata_license>CC0-1.0</metadata_license>
-  <project_license>MIT</project_license>
+  <project_license>GPL-3.0-or-later</project_license>
   <description>
     <p>Agentless SSH scanning of Linux hosts, repo-aware correlation with OSV, NVD and CISA KEV,
     CycloneDX SBOMs, Apprise alerts (ntfy, mail, ...), Ansible inventory import and a web UI.</p>

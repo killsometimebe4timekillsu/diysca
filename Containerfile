@@ -12,8 +12,9 @@ FROM docker.io/library/python:3.12-slim
 LABEL org.opencontainers.image.title="diysca" \
       org.opencontainers.image.description="Poor man's DIY CVE scanner" \
       org.opencontainers.image.source="https://github.com/killsometimebe4timekillsu/diysca" \
-      org.opencontainers.image.licenses="MIT"
+      org.opencontainers.image.licenses="GPL-3.0-or-later"
 COPY --from=build /opt/diysca /opt/diysca
+COPY LICENSE /usr/share/licenses/diysca/LICENSE
 RUN useradd --system --uid 10001 --home-dir /data diysca && install -d -o 10001 -g 10001 /data
 ENV PATH=/opt/diysca/bin:$PATH DIYSCA_DATA_DIR=/data DIYSCA_CONFIG=/config/config.yml PYTHONUNBUFFERED=1
 USER 10001
