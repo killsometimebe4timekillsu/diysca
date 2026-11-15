@@ -5,6 +5,8 @@ Two sources on each host (or container):
   specifications/*.gemspec, META-INF/maven/**/pom.properties inside *.jar
 * lockfiles: package-lock.json, yarn.lock, Gemfile.lock, poetry.lock,
   Pipfile.lock, requirements*.txt (== pins), composer.lock, Cargo.lock, go.mod
+* PHP: vendor/composer/installed.json, which Composer writes on every install, so PHP applications deployed
+  with their vendor/ directory but without composer.lock are covered too
 
 Only the paths in `lang_scan_paths` are searched (default: where apps and
 pip/npm/gem installs usually live, not the distro's own /usr/lib), so OS
@@ -37,7 +39,8 @@ find $ROOTS -xdev \\( {prune} \\) -prune -o \\( \\
     \\( -type f -name '*.gemspec' -path '*/specifications/*' -print \\) -o \\
     \\( -type f -name package.json -path '*/node_modules/*' -print \\) -o \\
     \\( -type f -name '*.jar' -print \\) -o \\
-    \\( -type f \\( {locks} \\) -not -path '*/node_modules/*' -print \\) \\
+    \\( -type f \\( {locks} \\) -not -path '*/node_modules/*' -print \\) -o \\
+    \\( -type f -name installed.json -path '*/vendor/composer/*' -print \\) \\
   \\) 2>/dev/null | head -n {max_entries} | while IFS= read -r f; do
   case "$f" in
     *.dist-info|*.egg-info) printf 'D\\t%s\\n' "$f" ;;
@@ -177,6 +180,14 @@ def parse_lockfile(path: str, text: str) -> list[LangPackage]:
                 for p in d.get(sec) or []:
                     if p.get("name") and p.get("version"):
                         res.append(("Packagist", p["name"], p["version"].lstrip("v")))
+        elif base == "installed.json" and "/vendor/composer/" in path:
+            d = json.loads(text)
+            pkgs = d.get("packages", []) if isinstance(d, dict) else d  # Composer 2 | Composer 1
+            for p in pkgs or []:
+                v = str(p.get("version") or "")
+                if p.get("name") and v and not v.startswith("dev-"):
+                    res.append(("Packagist", p["name"], v.lstrip("v")))
+            path = path.split("/vendor/composer/", 1)[0]
         elif base == "go.mod":
             for m in re.finditer(r"^\s*(?:require\s+)?([a-zA-Z0-9.\-_/]+\.[a-z]+/[^\s]+)\s+(v[^\s]+)", text, re.M):
                 res.append(("Go", m.group(1), m.group(2)))

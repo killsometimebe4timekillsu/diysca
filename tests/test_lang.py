@@ -86,3 +86,18 @@ def test_correlate_lang():
     assert len(c) == 1
     assert (c[0].vuln_id, c[0].fixed_version, c[0].severity, c[0].ecosystem) == ("CVE-2021-44228", "2.15.0", "CRITICAL", "Maven")
     assert c[0].location == "/opt/app/x.jar"
+
+
+def test_composer_installed_json():
+    from diysca.scanning.langpkgs import parse_lang_output, MARK, lang_script
+    v2 = '{"packages": [{"name": "guzzlehttp/guzzle", "version": "7.4.0"}, {"name": "monolog/monolog", "version": "v2.3.5"},' \
+         ' {"name": "acme/x", "version": "dev-main"}], "dev": true}'
+    v1 = '[{"name": "symfony/http-kernel", "version": "v4.4.10"}]'
+    out = (f"{MARK} /var/www/shop/vendor/composer/installed.json\n{v2}\n{MARK}END\n"
+           f"{MARK} /srv/old/vendor/composer/installed.json\n{v1}\n{MARK}END\n"
+           f"{MARK} /srv/other/installed.json\n{v1}\n{MARK}END\n")
+    got = {(p.ecosystem, p.name, p.version, p.locations[0]) for p in parse_lang_output(out)}
+    assert got == {("Packagist", "guzzlehttp/guzzle", "7.4.0", "/var/www/shop"),
+                   ("Packagist", "monolog/monolog", "2.3.5", "/var/www/shop"),
+                   ("Packagist", "symfony/http-kernel", "4.4.10", "/srv/old")}
+    assert "vendor/composer" in lang_script(["/var/www"])

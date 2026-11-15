@@ -25,7 +25,28 @@ echo '{SEP}apt-sources'; for f in /etc/apt/sources.list /etc/apt/sources.list.d/
 echo '{SEP}apt-deb822'; for f in /etc/apt/sources.list.d/*.sources; do [ -r "$f" ] && echo "#FILE $f" && cat "$f" && echo; done
 echo '{SEP}yum-repos'; for f in /etc/yum.repos.d/*.repo /etc/zypp/repos.d/*.repo; do [ -r "$f" ] && echo "#FILE $f" && cat "$f"; done
 echo '{SEP}apk-repos'; [ -r /etc/apk/repositories ] && cat /etc/apk/repositories
-echo '{SEP}end'
+echo '{SEP}apache'
+""" + r"""for c in /etc/apache2/mods-enabled/*.load /etc/apache2/conf-enabled/*.conf /etc/apache2/httpd.conf \
+         /etc/httpd/conf.modules.d/*.conf /etc/httpd/conf.d/*.conf /etc/httpd/conf/httpd.conf \
+         /usr/local/apache2/conf/httpd.conf /etc/apache2/sites-enabled/*.conf; do
+  [ -r "$c" ] && grep -hiE '^[[:space:]]*LoadModule[[:space:]]' "$c" 2>/dev/null
+done | awk '{print $2" "$3}' | tr -d '"' | sort -u | while read -r m f; do
+  case "$f" in /*) ;; *) for r in /usr/lib/apache2 /etc/httpd /usr/lib64/httpd /usr/local/apache2; do
+    [ -e "$r/$f" ] && f="$r/$f" && break; done ;; esac
+  o=""
+  command -v dpkg >/dev/null 2>&1 && o=$(dpkg -S "$f" 2>/dev/null | grep -v '^diversion' | head -1 | cut -d: -f1)
+  if [ -z "$o" ] && command -v rpm >/dev/null 2>&1; then o=$(rpm -qf --qf '%{NAME}' "$f" 2>/dev/null) || o=""; fi
+  printf 'M\t%s\t%s\t%s\n' "$m" "$f" "$o"
+done
+for b in apache2 httpd /usr/sbin/apache2 /usr/sbin/httpd /usr/local/apache2/bin/httpd; do
+  p=$(command -v "$b" 2>/dev/null) || continue
+  v=$("$p" -v 2>/dev/null | sed -n 's/^Server version: *//p' | head -1)
+  o=""
+  command -v dpkg >/dev/null 2>&1 && o=$(dpkg -S "$p" 2>/dev/null | head -1 | cut -d: -f1)
+  if [ -z "$o" ] && command -v rpm >/dev/null 2>&1; then o=$(rpm -qf --qf '%{NAME}' "$p" 2>/dev/null) || o=""; fi
+  [ -n "$v" ] && printf 'S\t%s\t%s\t%s\n' "$v" "$p" "$o" && break
+done
+""" + f"""echo '{SEP}end'
 """
 
 
@@ -66,6 +87,7 @@ class HostFacts:
     kernel: str = ""
     packages: list[Package] = field(default_factory=list)
     repos: list[Repo] = field(default_factory=list)
+    apache: list[dict] = field(default_factory=list)  # loaded Apache modules (and the server), see parse_apache
 
     @property
     def pkg_type(self) -> str:
@@ -274,6 +296,26 @@ def parse_apk_repos(text: str) -> list[Repo]:
     return repos
 
 
+def parse_apache(text: str, packages: list[Package]) -> list[dict]:
+    """LoadModule lines -> [{"name", "path", "owner", "version", "managed"}], plus the server binary itself.
+
+    A module (or httpd) that belongs to an OS package gets that package's version, and its CVEs come with that
+    package. One that no package owns was built or copied by hand: diysca lists it but can't check it."""
+    versions = {p.name: p.version for p in packages}
+    out = []
+    for line in text.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 3 or parts[0] not in ("M", "S"):
+            continue
+        kind, a, path, owner = (parts + [""])[:4]
+        owner = owner.strip() if owner.strip() in versions else ""  # else: not owned by any package
+        name = "httpd" if kind == "S" else a
+        version = versions.get(owner) or (a.split("/", 1)[-1].split()[0] if kind == "S" and "/" in a else "")
+        out.append({"name": name, "path": path, "owner": owner, "version": version or "unknown",
+                    "managed": bool(owner), "server": a if kind == "S" else ""})
+    return out
+
+
 def parse_collect_output(output: str) -> HostFacts:
     s = split_sections(output)
     osr = parse_os_release(s.get("os-release", ""))
@@ -288,6 +330,7 @@ def parse_collect_output(output: str) -> HostFacts:
         kernel=s.get("kernel", "").strip(),
     )
     facts.packages = parse_dpkg(s.get("dpkg", "")) or parse_rpm(s.get("rpm", "")) or parse_apk_db(s.get("apk", ""))
+    facts.apache = parse_apache(s.get("apache", ""), facts.packages)
     facts.repos = (parse_apt_sources(s.get("apt-sources", "")) + parse_deb822(s.get("apt-deb822", ""))
                    + parse_yum_repos(s.get("yum-repos", "")) + parse_apk_repos(s.get("apk-repos", "")))
     return facts

@@ -81,6 +81,9 @@ def store_results(host_id: int, facts: HostFacts, ecosystem: str | None, repo_ve
                  repo_versions.get(p.name), "", None) for p in facts.packages]
         rows += [(host_id, p.name, p.version, "", p.name, p.version, "lang", None, p.ecosystem,
                   ", ".join(p.locations[:5])) for p in lang_pkgs]
+        rows += [(host_id, m["name"], m["version"], "", m["owner"], m["version"], "apache", None, "Apache",
+                  m["path"] + (f" (package {m['owner']})" if m["owner"] else " (not from a package)"))
+                 for m in getattr(facts, "apache", [])]
         c.executemany("""INSERT INTO packages(host_id,name,version,arch,source_name,source_version,type,repo_version,
                            ecosystem,location) VALUES (?,?,?,?,?,?,?,?,?,?)""", rows)
         c.execute("DELETE FROM repos WHERE host_id=?", (host_id,))
@@ -167,6 +170,10 @@ async def scan_host(host_id: int, client: OSVClient | None = None, send_alerts: 
                     containers = await discover_containers(t)
                 except Exception as e:
                     problems.append(f"container discovery failed: {e}")
+        unmanaged = [m["name"] for m in facts.apache if not m["managed"]]
+        if unmanaged:
+            problems.append(f"Apache: {', '.join(unmanaged[:10])} not from an OS package, so diysca can't check "
+                            "them for CVEs (modules from packages are checked through their package)")
         eco = osv_ecosystem(facts.os_id, facts.os_version, facts.os_pretty)
         candidates = lang_candidates = None
         if eco is None:
