@@ -15,12 +15,17 @@ diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent
 * **SBOM:** one CycloneDX 1.5 JSON file per system, including a `vulnerabilities` section.
 * **Alerts** ([docs/alerts.md](docs/alerts.md)): sent via [Apprise](https://github.com/caronc/apprise/wiki), which covers ntfy, Gotify, e-mail, Telegram, Slack, Matrix, Discord, Teams, webhooks and more. Subscriptions decide *which packages on which systems at which severity* go to *which channel*. Each finding is sent only once.
 * **Ansible inventories:** INI and YAML, groups, `:children`, `:vars`, `group_vars/`, `host_vars/` and host ranges. If `ansible-inventory` is installed, it is used instead, so dynamic and vaulted inventories also work.
+* **Inventory providers** ([docs/inventory-providers.md](docs/inventory-providers.md)): systems straight from Proxmox VE, VMware vSphere, KVM/libvirt, OpenStack, Kubernetes and OpenShift (nodes, and the pod containers running on them), AWS EC2, Microsoft Azure, Google Cloud and Hetzner Cloud. Windows systems get an inventory (build, updates, programs) over OpenSSH; CVE matching for Windows isn't built yet.
+* **Scan what you pick:** all systems, one, the ones ticked on the Systems page, or a pattern (`web*,group:prod,!test-*`), from the UI, API, MCP and CLI.
 * **Patched CVEs:** what was patched, where, when and how (upgraded or removed), with a Grafana-style time picker: since the last patching of each system, the last 24 hours, 7, 30 or 90 days, a year, or a custom range. Playbook runs and repo updates show up as annotations on the chart.
 * **Reprovision from the SBOM:** every system's SBOM records its repositories, OS packages, pip/gem packages and container images. diysca turns it (or any CycloneDX SBOM with package URLs, e.g. from Syft or Trivy) into an Ansible playbook that rebuilds the system on a fresh install of the same OS release, at the recorded versions or with fixable vulnerabilities fixed.
 * **Approve for mitigation:** when diysca can't reach a system, approve its findings instead. Agents, CI/CD pipelines (GitHub Actions, GitLab CI, any webhook) or colleagues who can reach it claim the mitigation, run its playbook and report back; diysca then rescans. See [docs/mitigations.md](docs/mitigations.md).
 * **MCP server:** AI agents and MCP clients use diysca through `diysca mcp` (stdio) or `<base_url>/mcp` (HTTP). See [docs/mcp.md](docs/mcp.md).
 * **API:** everything in the UI is available as JSON, with bearer tokens for automation. See [docs/api.md](docs/api.md) and `<base_url>/docs`.
-* **Web UI:** a classic Grafana-style dark UI (light theme on request). Click the logo to show the menu with or without names. Pages: dashboard, systems, **Findings** (tabs Findings and Packages), **Patching** (tabs Patch, Mitigations and Patched CVEs), and one **Settings** area (General, CVE Sources, Notifications, Repo Manager, Hand-off, Import / Export). Findings can be filtered by system, group, OS, host or container, package, ecosystem, CVE, severity, fix availability and KEV. Filters can be saved, and you can manage channels and subscriptions from the UI.
+* **Web UI:** a classic Grafana-style dark UI (light theme on request). Click the logo to show the menu with or without names. Pages: dashboard, systems, **Findings** (tabs Findings and Packages), **Patching** (tabs Patch, Mitigations, Patch log and Patched CVEs), and one **Settings** area (General, CVE Sources, Inventory, Notifications, Repo Manager, Hand-off, Access, Import / Export). Findings can be filtered by system, group, OS, host or container, package, ecosystem, CVE, severity, fix availability and KEV. Filters can be saved, and you can manage channels and subscriptions from the UI.
+* **Modules** ([docs/modules.md](docs/modules.md)): scanning is the core; alerting, mitigation and auth can be switched off.
+* **Login and roles** ([docs/auth.md](docs/auth.md)): OIDC single sign-on (Keycloak, Entra ID, Authentik, Okta, ...), roles viewer / operator / approver / admin bound to groups, users or e-mail patterns, optionally limited to some systems, and an audit log of every change.
+* **Patch log** ([docs/patch-log.md](docs/patch-log.md)): every patching with what, where, when, who approved it, who ran it and whether the rescan confirmed it, exportable as CSV or JSON.
 * **Database:** PostgreSQL. SQLite remains available for single-user desktop installs, i.e. the AppImage and Flatpak.
 
 ![patched CVEs](docs/patched.png)
@@ -134,6 +139,7 @@ A finding is patched when a scan no longer sees it. diysca stores when that happ
 diysca import ~/ansible/inventory/hosts.ini
 diysca add-host myself --local          # scan the machine diysca runs on
 diysca scan --no-alerts
+diysca scan 'web*' group:dmz            # only some systems (names or patterns)
 diysca findings
 diysca sbom system_a > system_a.cdx.json
 diysca channel ntfy ntfy://ntfy.sh/my-secret-topic
@@ -147,6 +153,7 @@ diysca settings export > settings.yml   # sources, channels, subscriptions, save
 diysca settings import settings.yml --dry-run
 diysca reprovision system_a -o rebuild.yml
 diysca patched --range 7d               # what got patched in the last week
+diysca patchlog --range 90d -o patchlog.csv   # the patch log for auditors (--format json)
 diysca mitigations approve --filter 'host=db1&fix=repo' --note CHG-1234
 diysca mitigations                      # open mitigations
 diysca mitigations report 12 --status done --log @run.log
@@ -222,3 +229,5 @@ GitHub Actions and GitLab CI examples: [docs/mitigations.md](docs/mitigations.md
 * Images without `/bin/sh` (distroless, scratch) can't be scanned through `exec`.
 * Language packages are reported with a fix version and their location. Upgrading them is left to the application's own build, and the playbook lists them as manual items.
 * Fat jars that nest other jars are only read one level deep.
+* Windows systems are inventoried but not matched against Microsoft's security updates (MSRC) yet.
+* OIDC ID token signatures aren't verified (the token comes straight from the provider over TLS, which the spec allows); issuer, audience, expiry and nonce are.

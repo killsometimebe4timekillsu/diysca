@@ -1,7 +1,12 @@
 import asyncio
 
-from diysca import db
-from diysca.containers import SEP, ContainerTransport, parse_discovery, sync_container_hosts
+from diysca.core import db
+from diysca.scanning.containers import (
+    SEP,
+    ContainerTransport,
+    parse_discovery,
+    sync_container_hosts,
+)
 
 
 def test_parse_discovery_dedups_images():

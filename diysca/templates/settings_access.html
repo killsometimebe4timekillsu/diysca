@@ -1,0 +1,35 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+{{ m.settings_tabs(tab) }}
+<div class="row">
+<div class="card"><h2>Login</h2>
+<table>
+<tr><th>Single sign-on (OIDC)</th><td>{% if oidc_on %}<span class="ok">on</span> · <span class="mono">{{ issuer }}</span><br><small class="muted">Redirect URI to register at the provider: <span class="mono">{{ redirect_uri }}</span></small>{% else %}<span class="muted">off</span> (set <span class="mono">oidc:</span> in config.yml){% endif %}</td></tr>
+<tr><th>Break-glass admin</th><td>{{ 'web_user (HTTP basic auth), always admin' if basic else 'not set' }}</td></tr>
+<tr><th>You</th><td>{{ user.name }} · <b>{{ user.role }}</b>{% if user.hosts %} · systems {{ user.hosts|join(', ') }}{% endif %}{% if user.groups %}<br><small class="muted">groups: {{ user.groups[:20]|join(', ') }}</small>{% endif %}</td></tr>
+<tr><th>Default role</th><td>{{ default_role or 'none (users without a binding get no access)' }}</td></tr>
+</table></div>
+<div class="card"><h2>Role bindings</h2>
+<table><tr><th>Who</th><th>Role</th><th>Systems</th></tr>
+{% for b in bindings %}<tr><td>{% if b.group %}group <b>{{ b.group }}</b>{% elif b.user %}user <b>{{ b.user }}</b>{% else %}e-mail <b>{{ b.email }}</b>{% endif %}</td><td><span class="tag">{{ b.role }}</span></td><td class="mono">{{ b.hosts or 'all' }}</td></tr>
+{% else %}<tr><td colspan="3" class="muted">No bindings. Set <span class="mono">rbac: bindings:</span> in config.yml.</td></tr>{% endfor %}
+{% for n, r, h in tokens %}<tr><td>API token <b>{{ n }}</b></td><td><span class="tag">{{ r }}</span></td><td class="mono">{{ h }}</td></tr>{% endfor %}
+</table>
+<p class="muted"><small><b>viewer</b> reads · <b>operator</b> + scans, ignores, playbooks, claims and reports mitigations · <b>approver</b> + approves and cancels mitigations · <b>admin</b> + settings, systems, repo runs. Bindings live in config.yml so they can be reviewed like code.</small></p>
+</div></div>
+<div class="card"><h2>Audit log</h2>
+<form class="filters" method="get">
+  <label>Who<input name="actor" value="{{ args.actor or '' }}"></label>
+  <label>Action<input name="action" value="{{ args.action or '' }}" placeholder="login, POST /mitigations"></label>
+  <label>From<input type="date" name="from" value="{{ args.get('from','') }}"></label>
+  <label>To<input type="date" name="to" value="{{ args.get('to','') }}"></label>
+  <button>Filter</button> <a href="/settings/access/audit.csv?{{ query_string }}">Export CSV</a>
+</form>
+<div style="overflow-x:auto"><table><tr><th>When</th><th>Who</th><th>Role</th><th>Action</th><th>Detail</th><th>Result</th><th>From</th></tr>
+{% for l in log %}<tr><td class="mono" style="white-space:nowrap"><small>{{ l.at[:19].replace('T',' ') }}</small></td><td>{{ l.actor }}</td><td>{{ l.role or '' }}</td><td class="mono"><small>{{ l.action }}</small></td><td><small>{{ (l.detail or '')[:120] }}</small></td>
+<td class="{{ 'bad' if l.status and l.status >= 400 else '' }}">{{ l.status or '' }}</td><td class="mono"><small>{{ l.ip or '' }}</small></td></tr>
+{% else %}<tr><td colspan="7" class="muted">Nothing logged yet.</td></tr>{% endfor %}</table></div>
+<p class="muted"><small>Every change (any non-GET request), login, logout and denied login is kept for the number of days in (<span class="mono">audit_days</span>). The patch log (Patching &gt; Patch log) has the patching-specific view.</small></p>
+</div>
+{% endblock %}

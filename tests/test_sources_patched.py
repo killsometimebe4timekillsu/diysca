@@ -9,8 +9,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from fastapi.testclient import TestClient
 
-from diysca import db, patched, scanner, sources
-from diysca.config import settings
+from diysca.core import db
+from diysca.core.config import settings
+from diysca.mitigation import patched
+from diysca.scanning import scanner, sources
 
 from . import test_pipeline as tp
 from .test_pipeline import (  # noqa: F401  (fixtures share the fake host)
@@ -101,7 +103,7 @@ def test_custom_csv_and_json(tmp_path):
          fields={"id": "advisory", "package": "pkg", "fixed": "fixed_in", "cvss": "score", "aliases": "cves"},
          defaults={"ecosystem": "Debian:12"})
     v = asyncio.run(sources.SourcesClient().get_vuln("acme-csv/ACME-1"))
-    from diysca.feeds import vuln_cves, vuln_severity
+    from diysca.scanning.feeds import vuln_cves, vuln_severity
     assert vuln_cves(v) == ["CVE-2030-7"] and vuln_severity(v)[:2] == (7.5, "HIGH")
     doc = {"data": {"items": [{"id": "V-9", "product": {"name": "left-pad", "eco": "npm"}, "affected": ["1.0.0", "1.0.1"],
                                "sev": "critical"}]}}
@@ -120,7 +122,7 @@ def test_epss(tmp_path):
     assert res["count"] == 1
     db.x("INSERT INTO hosts(name) VALUES ('a')")
     db.x("INSERT INTO findings(host_id,package,version,vuln_id,cve,status) VALUES (1,'p','1','CVE-2025-1094','CVE-2025-1094','open')")
-    from diysca.feeds import apply_enrichment
+    from diysca.scanning.feeds import apply_enrichment
     apply_enrichment()
     assert db.q1("SELECT epss FROM findings")["epss"] == pytest.approx(0.81)
 

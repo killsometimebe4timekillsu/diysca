@@ -1,6 +1,6 @@
 import pytest
 
-from diysca.versions import apk_compare, dpkg_compare, max_version, rpm_compare
+from diysca.core.versions import apk_compare, dpkg_compare, max_version, rpm_compare
 
 
 @pytest.mark.parametrize("a,b,r", [

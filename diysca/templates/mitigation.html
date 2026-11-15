@@ -11,6 +11,7 @@
 <tr><th>Systems</th><td>{{ mi.hosts|join(', ') }}</td></tr>
 <tr><th>Findings</th><td>{{ mi.findings|length }} ({{ mi.open_findings }} still open) · worst {{ m.sev(mi.summary.worst_severity) }}{% if mi.summary.kev %} · <span class="kev">{{ mi.summary.kev }} KEV</span>{% endif %}</td></tr>
 <tr><th>Playbook</th><td>{{ mi.summary.playbook_packages }} packages on {{ mi.summary.playbook_hosts }} systems{% if mi.summary.manual_items %}, {{ mi.summary.manual_items }} manual items{% endif %} · <a href="/mitigations/{{ mi.id }}/playbook.yml">download</a></td></tr>
+<tr><th>Patch log</th><td><a href="/mitigations/{{ mi.id }}/log.json">export this mitigation (JSON)</a> · <a href="/patchlog?kind=mitigation">all mitigations in the patch log</a></td></tr>
 <tr><th>Hand-off</th><td>{{ mi.handoff or 'pull (API / MCP)' }}{% if mi.handoff_result %} · <small>{{ mi.handoff_result }}</small>{% endif %}</td></tr>
 <tr><th>Claimed</th><td>{{ mi.claimed_by or '–' }} {{ mi.claimed_at or '' }}</td></tr>
 <tr><th>Rescan when done</th><td>{{ 'yes' if mi.rescan else 'no' }}</td></tr>

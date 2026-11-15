@@ -1,8 +1,14 @@
 import asyncio
 
-from diysca.correlate import correlate_lang
-from diysca.langpkgs import MARK, LangPackage, lang_script, parse_lang_output, parse_lockfile
-from diysca.versions import compare
+from diysca.core.versions import compare
+from diysca.scanning.correlate import correlate_lang
+from diysca.scanning.langpkgs import (
+    MARK,
+    LangPackage,
+    lang_script,
+    parse_lang_output,
+    parse_lockfile,
+)
 
 
 def test_parse_installed_artifacts():

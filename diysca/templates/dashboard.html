@@ -10,7 +10,7 @@
   <a class="stat" href="/findings?severity=HIGH"><span class="muted">High+</span><b class="warn">{{ sev.get('HIGH',0) + sev.get('CRITICAL',0) }}</b></a>
   <a class="stat" href="/findings?fix=repo"><span class="muted">Fix in your repos</span><b class="ok">{{ stats.fixable }}</b></a>
   <a class="stat" href="/findings?kev=1"><span class="muted">Known exploited</span><b class="{{ 'bad' if stats.kev }}">{{ stats.kev }}</b></a>
-  <a class="stat" href="/patched?range=7d"><span class="muted">Patched, last 7 days</span><b class="info">{{ stats.patched_7d }}</b></a>
+  {% if has_module('mitigation') %}<a class="stat" href="/patched?range=7d"><span class="muted">Patched, last 7 days</span><b class="info">{{ stats.patched_7d }}</b></a>{% endif %}
 </div>
 <div class="row">
 <div class="card"><h2>Systems</h2>

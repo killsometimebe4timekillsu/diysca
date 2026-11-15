@@ -1,0 +1,40 @@
+{% extends "base.html" %}{% import "macros.html" as m %}
+{% block title %}Patch log{% endblock %}
+{% set keep = {'kind': args.kind, 'status': args.status, 'host': args.host, 'cve': args.cve, 'approver': args.approver, 'executor': args.executor} %}
+{% macro qs(extra) %}{% for k, v in dict(keep, **extra).items() if v %}{{ '&' if not loop.first }}{{ k }}={{ v|urlencode }}{% endfor %}{% endmacro %}
+{% block content %}
+{{ m.view_tabs(page) }}
+<div class="card">
+<form class="filters" method="get">
+  <label>Time range<select name="range">{% for k, v in ranges.items() if k != 'last' %}<option value="{{ k }}" {{ 'selected' if range==k }}>{{ v }}</option>{% endfor %}<option value="custom" {{ 'selected' if range=='custom' }}>custom</option></select></label>
+  <label>From<input type="date" name="from" value="{{ args.get('from', '') }}"></label>
+  <label>To<input type="date" name="to" value="{{ args.get('to', '') }}"></label>
+  <label>Kind<select name="kind"><option value="">all</option>{% for k in kinds %}<option {{ 'selected' if args.kind==k }}>{{ k }}</option>{% endfor %}</select></label>
+  <label>Status<select name="status"><option value="">any</option>{% for s in ['generated','ok','done','failed','cancelled'] %}<option {{ 'selected' if args.status==s }}>{{ s }}</option>{% endfor %}</select></label>
+  <label>System<input name="host" value="{{ args.host or '' }}" size="12"></label>
+  <label>CVE<input name="cve" value="{{ args.cve or '' }}" size="14"></label>
+  <label>Approver<input name="approver" value="{{ args.approver or '' }}" size="10"></label>
+  <label>Executor<input name="executor" value="{{ args.executor or '' }}" size="10"></label>
+  <button>Filter</button> <a href="/patchlog">reset</a>
+</form>
+<p class="muted">{{ rows|length }} entries · {{ label }} ({{ start[:10] }} to {{ end[:10] }}) ·
+  <b>Export:</b> <a href="/patchlog.csv?range={{ range }}&from={{ args.get('from','') }}&to={{ args.get('to','') }}&{{ qs({}) }}">CSV</a> ·
+  <a href="/api/patchlog?range={{ range }}&from={{ args.get('from','') }}&to={{ args.get('to','') }}&{{ qs({}) }}">JSON</a></p>
+<div style="overflow-x:auto"><table><tr><th>When</th><th>Kind</th><th>Status</th><th>What</th><th>Systems</th><th>Findings</th><th>Approved by</th><th>Run by</th><th>Started</th><th>Verified</th></tr>
+{% for r in rows %}<tr>
+<td class="mono" style="white-space:nowrap">{{ r.at[:16].replace('T',' ') }}</td>
+<td><span class="tag">{{ r.kind }}</span></td>
+<td><span class="tag st-{{ {'ok':'done','generated':'approved'}.get(r.status, r.status) }}">{{ r.status }}</span></td>
+<td>{% if r.mitigation_id %}<a href="/mitigations/{{ r.mitigation_id }}">{{ r.summary }}</a>{% else %}{{ r.summary }}{% endif %}
+  {% if r.cves %}<br><small class="muted">{{ r.cves[:6]|join(', ') }}{% if r.cves|length > 6 %} +{{ r.cves|length - 6 }}{% endif %}</small>{% endif %}
+  {% if r.detail %}<details><summary><small>details</small></summary><pre class="mono"><small>{{ r.detail }}</small></pre></details>{% endif %}</td>
+<td>{{ r.hosts[:4]|join(', ') }}{% if r.hosts|length > 4 %} +{{ r.hosts|length - 4 }}{% endif %}</td>
+<td>{{ r.findings if r.findings is not none else '' }}</td>
+<td>{% if r.approver %}{{ r.approver }}<br><small class="muted">{{ (r.approved_at or '')[:16].replace('T',' ') }}</small>{% endif %}</td>
+<td>{{ r.executor or r.actor or '' }}</td>
+<td class="mono"><small>{{ (r.started_at or '')[:16].replace('T',' ') }}</small></td>
+<td>{% if r.verified %}<span class="{{ 'ok' if r.verified.split('/')[0] == r.verified.split('/')[1] else '' }}">{{ r.verified }}</span>{% endif %}</td>
+</tr>{% else %}<tr><td colspan="10" class="muted">Nothing was patched in this range.</td></tr>{% endfor %}</table></div>
+<p class="muted"><small>Every patching leaves an entry: generated playbooks, repo updates, rebuild playbooks and finished mitigations (with who approved and who ran them). <b>Verified</b> = findings of the mitigation that the rescan no longer sees, out of all. Full guide: docs/patch-log.md.</small></p>
+</div>
+{% endblock %}

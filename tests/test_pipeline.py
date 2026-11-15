@@ -5,11 +5,13 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from diysca import db, notify, scanner
-from diysca.collectors import SEP
-from diysca.correlate import evaluate
-from diysca.feeds import cvss3_base_score, osv_ecosystem, vuln_severity
-from diysca.sbom import build_sbom
+from diysca.alerting import notify
+from diysca.core import db
+from diysca.scanning import scanner
+from diysca.scanning.collectors import SEP
+from diysca.scanning.correlate import evaluate
+from diysca.scanning.feeds import cvss3_base_score, osv_ecosystem, vuln_severity
+from diysca.scanning.sbom import build_sbom
 
 HOST_OUTPUT = (
     f"{SEP}os-release\nID=debian\nVERSION_ID=\"12\"\nPRETTY_NAME=\"Debian GNU/Linux 12 (bookworm)\"\n"

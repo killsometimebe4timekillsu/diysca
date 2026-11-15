@@ -1,5 +1,13 @@
-from diysca.collectors import (SEP, parse_apk_db, parse_apt_sources, parse_collect_output, parse_deb822,
-                               parse_dpkg, parse_rpm, parse_yum_repos)
+from diysca.scanning.collectors import (
+    SEP,
+    parse_apk_db,
+    parse_apt_sources,
+    parse_collect_output,
+    parse_deb822,
+    parse_dpkg,
+    parse_rpm,
+    parse_yum_repos,
+)
 
 
 def test_dpkg_with_source_and_removed():

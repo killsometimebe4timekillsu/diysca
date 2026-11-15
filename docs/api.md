@@ -10,7 +10,7 @@ through it, and mitigations can be worked through end to end.
 
 | Who | How | Opens |
 |---|---|---|
-| People | HTTP basic auth with `web_user` / `web_password` | web UI and API |
+| People | OIDC login (session cookie) or HTTP basic auth with `web_user` / `web_password` | web UI and API |
 | Agents, CI/CD, MCP clients | `Authorization: Bearer <token>`, tokens from `api_tokens` | `/api/*` and `/mcp` only |
 | Probes | nothing | `/healthz` |
 
@@ -26,6 +26,11 @@ agents_can_approve: false
 
 or `DIYSCA_API_TOKENS=ci:3f9c…,grafana:81aa…`. The token's name is recorded as `token:<name>` when it claims or
 reports a mitigation.
+
+With the auth module, every caller has a role (viewer, operator, approver, admin) and optionally a host scope;
+tokens get them per token: `api_tokens: {ci: {token: "…", role: operator, hosts: "group:dmz"}}`. A call outside
+the role answers `403`, systems outside the scope are invisible (`404`). `GET /api/me` shows who you are. See
+[auth.md](auth.md).
 
 Without `web_user`/`web_password` and without `api_tokens`, everything is open; only do that in a lab. Once
 `api_tokens` are set, `/api/*` always needs a token or the basic-auth login.
@@ -52,7 +57,9 @@ Without `web_user`/`web_password` and without `api_tokens`, everything is open; 
 | GET | `/api/hosts/{id}/sbom` | CycloneDX SBOM of a system |
 | GET | `/api/patched` | patched findings in a time range |
 | GET | `/api/sources` | extra vulnerability sources |
-| POST | `/api/scan` | scan now |
+| POST | `/api/scan` | scan all, one or selected systems |
+| GET | `/api/patchlog` | the patch log (also `/patchlog.csv`) |
+| GET | `/api/me` | the caller's name, role and scope |
 | GET | `/api/mitigations` | mitigations |
 | POST | `/api/mitigations` | approve findings |
 | GET | `/api/mitigations/{id}` | one mitigation, with playbook |
@@ -157,8 +164,28 @@ The extra vulnerability sources (Debian tracker, Alpine secdb, OSV feeds, custom
 
 ### POST /api/scan
 
-`?host=<name>` scans one system, without it every enabled system. The request waits for the scan and returns
-the result per system (`host`, `packages`, `language_packages`, `open_findings`, `alerts_sent`, `error`, and `containers` for the containers on it). Use a long client timeout for full scans.
+| Parameter | Scans |
+|---|---|
+| none | every enabled system |
+| `host=web1` | that system (returns one result object) |
+| `hosts=web*,group:prod,!test-*` | systems matching the patterns (the syntax of alert subscriptions) |
+| `id=3&id=7` | those systems by id, disabled ones too |
+| `wait=false` | start in the background, answer `202 {"started": [names]}` |
+
+`hosts` and `id` combine; no match answers `404`. Only systems in the caller's scope are scanned.
+
+```sh
+curl -X POST -H "Authorization: Bearer $TOKEN" "https://diysca.example.org/api/scan?hosts=group:dmz&wait=false"
+```
+
+Without `wait=false` the request waits for the scan and returns the result per system (`host`, `packages`, `language_packages`, `open_findings`, `alerts_sent`, `error`, and `containers` for the containers on it). Use a long client timeout for full scans.
+
+### GET /api/patchlog
+
+One entry per patching: generated playbooks, repo updates, finished mitigations, rebuild playbooks, with
+approver, executor, times, systems, CVEs and result. Same filters as the UI (`range`, `from`, `to`, `kind`,
+`status`, `host`, `cve`, `approver`, `executor`). `/patchlog.csv` gives the same as CSV. See
+[patch-log.md](patch-log.md).
 
 ### Mitigations
 

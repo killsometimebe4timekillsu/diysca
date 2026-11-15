@@ -5,7 +5,9 @@ import json
 import yaml
 from fastapi.testclient import TestClient
 
-from diysca import db, reprovision, scanner, settings_io, sources
+from diysca.core import db, settings_io
+from diysca.mitigation import reprovision
+from diysca.scanning import scanner, sources
 
 from . import test_pipeline as tp
 

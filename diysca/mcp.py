@@ -15,8 +15,11 @@ import asyncio
 import json
 import sys
 
-from . import __version__, db, mitigate, patch, patched, scanner
-from .config import settings
+from diysca import __version__
+from diysca.core import db, modules
+from diysca.core.config import settings
+from diysca.mitigation import mitigate, patch, patched
+from diysca.scanning import scanner
 
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 MAX_TEXT = 200_000
@@ -31,15 +34,22 @@ INSTRUCTIONS = (
 
 
 class Context:
-    """Who is calling. Agents (token holders, stdio) may approve only with agents_can_approve."""
+    """Who is calling. Agents (token holders, stdio) may approve only with the approver role
+    (agents_can_approve: true, or a token with role: approver)."""
 
-    def __init__(self, actor: str = "mcp", is_token: bool = True, is_agent: bool | None = None):
-        self.actor = actor
-        self.is_agent = is_token if is_agent is None else is_agent
+    def __init__(self, actor: str = "mcp", is_token: bool = True, is_agent: bool | None = None, user=None):
+        from diysca.core.security import User, token_user
+        if user is None:
+            user = token_user(actor.removeprefix("token:"), {}) if (is_token if is_agent is None else is_agent) \
+                else User(name=actor)
+            user.name = actor
+        self.user = user
+        self.actor = user.name
+        self.is_agent = user.is_agent if is_agent is None else is_agent
 
     @property
     def may_approve(self) -> bool:
-        return (not self.is_agent) or settings.agents_can_approve
+        return self.user.can("approver")
 
 
 def _s(desc: str, **props) -> dict:
@@ -90,8 +100,17 @@ TOOLS: dict[str, dict] = {
                             id={"type": "integer", "required": True},
                             status={"type": "string", "enum": ["running", "done", "failed"], "required": True},
                             log={"type": "string", "description": "what was done, e.g. the ansible-playbook output"}),
-    "start_scan": _s("Scan one system now (or all when host is left out) and return the result.",
-                     host={"type": "string", "description": "system name"}),
+    "patch_log": _s("The patch log: one entry per playbook, repo update, rebuild playbook and finished mitigation, with "
+                    "approver, executor, result and whether the rescan verified the fix.",
+                    range={"type": "string", "enum": ["24h", "7d", "30d", "90d", "1y", "custom"], "default": "30d"},
+                    **{"from": {"type": "string"}, "to": {"type": "string"}},
+                    kind={"type": "string", "enum": ["playbook", "repo", "mitigation", "reprovision"]},
+                    host={"type": "string"}, cve={"type": "string"}, status={"type": "string"}),
+    "start_scan": _s("Scan systems now and return the results: one (host), a selection (hosts patterns and / or "
+                     "host_ids) or every enabled system (nothing given).",
+                     host={"type": "string", "description": "one system name"},
+                     hosts={"type": "string", "description": "patterns: web*,db1 | group:prod | !test-*"},
+                     host_ids={"type": "array", "items": {"type": "integer"}, "description": "system ids"}),
     "approve_findings": _s("Approve findings for mitigation (only offered when agents_can_approve is on).",
                            finding_ids=_IDS, filter=_FILTER, note={"type": "string"},
                            handoff={"type": "string", "description": "hand-off target name"}),
@@ -99,21 +118,24 @@ TOOLS: dict[str, dict] = {
                             id={"type": "integer", "required": True}, reason={"type": "string"}),
 }
 _APPROVER_TOOLS = {"approve_findings", "cancel_mitigation"}
-_READ_ONLY = {"list_systems", "search_findings", "get_finding", "get_sbom", "list_patched", "generate_playbook",
+_OPERATOR_TOOLS = {"claim_mitigation", "report_mitigation", "start_scan"}
+_READ_ONLY = {"patch_log", "list_systems", "search_findings", "get_finding", "get_sbom", "list_patched", "generate_playbook",
               "list_mitigations", "get_mitigation"}
 
 
 def tool_list(ctx: Context) -> list[dict]:
     out = []
+    enabled = modules.mcp_tools()
     for name, t in TOOLS.items():
-        if name in _APPROVER_TOOLS and not ctx.may_approve:
+        if name not in enabled or (name in _APPROVER_TOOLS and not ctx.may_approve) or \
+                (name in _OPERATOR_TOOLS and not ctx.user.can("operator")):
             continue
         out.append({"name": name, **t, "annotations": {"readOnlyHint": name in _READ_ONLY}})
     return out
 
 
 def _ids(args: dict) -> list[int]:
-    from .web import _ids_from_filter
+    from diysca.ui import _ids_from_filter
     ids = [int(i) for i in args.get("finding_ids") or []]
     if not ids and args.get("filter"):
         ids = _ids_from_filter(str(args["filter"]))
@@ -136,10 +158,10 @@ def _bg(coro):
 
 
 async def call(name: str, args: dict, ctx: Context):
-    from . import web
-    from .sbom import build_sbom
+    from diysca import ui as web
+    from diysca.scanning.sbom import build_sbom
 
-    if name not in TOOLS or (name in _APPROVER_TOOLS and not ctx.may_approve):
+    if name not in {t["name"] for t in tool_list(ctx)}:
         raise ValueError(f"unknown tool {name}")
     a = {k: v for k, v in (args or {}).items() if v is not None}
     if name == "list_systems":
@@ -157,7 +179,8 @@ async def call(name: str, args: dict, ctx: Context):
                 "mitigation_status", "first_seen", "summary")
         return {"total": len(rows), "findings": [{k: r[k] for k in keep} for r in rows[:limit]]}
     if name == "get_finding":
-        return web.api_finding(int(a["id"]))
+        from diysca.scanning.routes import api_finding
+        return api_finding(int(a["id"]))
     if name == "get_sbom":
         return build_sbom(_host_id(str(a["host"])))
     if name == "list_patched":
@@ -181,10 +204,17 @@ async def call(name: str, args: dict, ctx: Context):
         if rescan:
             _bg(scanner.scan_all(host_ids=rescan))
         return {**m, "rescan_hosts": rescan}
+    if name == "patch_log":
+        from diysca.mitigation import patchlog
+        d = patchlog.query({k: str(v) for k, v in a.items()})
+        return {"range": d["range"], "start": d["start"], "end": d["end"], "entries": d["rows"]}
     if name == "start_scan":
         if a.get("host"):
             return await scanner.scan_host(_host_id(str(a["host"])))
-        return await scanner.scan_all()
+        sel = scanner.select_hosts(a.get("hosts"), a.get("host_ids"))
+        if (a.get("hosts") or a.get("host_ids")) and not sel:
+            raise ValueError("no system matches")
+        return await scanner.scan_all(host_ids=sel)
     if name == "approve_findings":
         return mitigate.approve(_ids(a), ctx.actor, str(a.get("note") or ""), a.get("handoff") or None)
     if name == "cancel_mitigation":
