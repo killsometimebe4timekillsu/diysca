@@ -33,6 +33,7 @@ def main(argv=None):
     s = sp.add_parser("scan", help="scan hosts now")
     s.add_argument("hosts", nargs="*", help="host names or patterns: web* db1 group:prod !test-* (default: all enabled)")
     s.add_argument("--no-alerts", action="store_true")
+    s.add_argument("--no-nvd", action="store_true", help="skip the NVD lookup after the scan (it is time-boxed anyway)")
 
     s = sp.add_parser("patchlog", help="export the patch log (who patched what, when, approved by whom)")
     s.add_argument("--range", default="30d", help="24h, 7d, 30d, 90d, 1y or custom (with --from / --to)")
@@ -168,7 +169,7 @@ def main(argv=None):
                         [r["id"] for r in db.q("SELECT id FROM hosts WHERE enabled=1")]]
             res = asyncio.run(run())
         else:
-            res = asyncio.run(scanner.scan_all(host_ids=ids))
+            res = asyncio.run(scanner.scan_all(host_ids=ids, enrich="off" if a.no_nvd else "inline"))
         for r in res:
             print(json.dumps(r))
     elif a.cmd == "patchlog":

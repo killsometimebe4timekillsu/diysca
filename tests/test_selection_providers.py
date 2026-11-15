@@ -313,3 +313,39 @@ def test_gcp_service_account():
     assert [(h.name, h.address) for h in hs] == [("web", "10.2.0.2"), ("win", "10.2.0.3")]
     assert {"gcp", "project_p1", "zone_europe-west3-a", "label_env_prod", "tag_http"} <= hs[0].groups
     assert "windows" in hs[1].groups
+
+
+def test_nvd_is_time_boxed_and_prioritised(monkeypatch):
+    import asyncio
+    from diysca.scanning import feeds
+    ids = _hosts()
+    for hid, cve, sev in ((ids["db1"], "CVE-2024-0001", "HIGH"), (ids["web1"], "CVE-2024-0002", "UNKNOWN"),
+                          (ids["web1"], "CVE-2024-0003", "LOW"), (ids["db1"], "CVE-2024-0004", None)):
+        db.x("""INSERT INTO findings(host_id, vuln_id, cve, package, version, severity, status, first_seen, last_seen)
+                VALUES (?,?,?,?,?,?,'open',?,?)""", (hid, cve, cve, "p", "1", sev, db.now(), db.now()))
+    assert feeds.nvd_pending([ids["web1"]]) == ["CVE-2024-0002", "CVE-2024-0003", "CVE-2024-0004", "CVE-2024-0001"]
+    assert feeds.nvd_pending()[:2] == ["CVE-2024-0002", "CVE-2024-0004"]
+    calls = []
+
+    class FakeClient:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, params=None):
+            calls.append(params["cveId"])
+            return httpx.Response(429 if len(calls) > 2 else 200, json={"vulnerabilities": [{"cve": {
+                "descriptions": [{"lang": "en", "value": "x"}],
+                "metrics": {"cvssMetricV31": [{"cvssData": {"baseScore": 9.8, "baseSeverity": "CRITICAL"}}]}}}]})
+    monkeypatch.setattr(feeds.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(settings, "nvd_enabled", True)
+    sleeps = []
+
+    async def fake_sleep(s):
+        sleeps.append(s)
+    monkeypatch.setattr(feeds.asyncio, "sleep", fake_sleep)
+    n = asyncio.run(feeds.nvd_enrich(host_ids=[ids["web1"]]))
+    assert n == 2 and calls == ["CVE-2024-0002", "CVE-2024-0003", "CVE-2024-0004"]  # stops at the 429
+    assert 30 not in sleeps
+    assert db.q1("SELECT severity FROM findings WHERE cve='CVE-2024-0002'")["severity"] == "CRITICAL"
+    calls.clear()
+    assert asyncio.run(feeds.nvd_enrich(budget=0)) == 1 and len(calls) == 1  # budget 0: one request, then stop

@@ -260,14 +260,34 @@ async def fetch_vulns(client: OSVClient, ids: set[str]) -> dict[str, dict]:
 
 
 # ----------------------------------------------------------------- NVD
-async def nvd_enrich(limit: int = 200) -> int:
-    """Fill CVSS for CVEs where the distro feed gave none. Respects NVD rate limits."""
+def nvd_pending(host_ids: list[int] | None = None, limit: int = 200) -> list[str]:
+    """Open CVEs not looked up at NVD yet: the given systems' first, then those without a severity."""
+    in_hosts = "0"
+    p: list = []
+    if host_ids:
+        in_hosts = f"CASE WHEN f.host_id IN ({','.join('?' * len(host_ids))}) THEN 0 ELSE 2 END"
+        p = [int(i) for i in host_ids]
+    rows = db.q(f"""SELECT f.cve, MIN({in_hosts} + CASE WHEN f.severity IS NULL OR f.severity='UNKNOWN' THEN 0 ELSE 1 END) prio
+                    FROM findings f LEFT JOIN nvd_cache n ON n.cve=f.cve
+                    WHERE f.cve IS NOT NULL AND f.status='open' AND n.cve IS NULL
+                    GROUP BY f.cve ORDER BY prio, f.cve LIMIT ?""", p + [limit])
+    return [r["cve"] for r in rows]
+
+
+async def nvd_enrich(limit: int = 200, host_ids: list[int] | None = None, budget: float | None = None) -> int:
+    """Fill CVSS and descriptions from NVD for CVEs where the distro feed gave none.
+
+    Respects the NVD rate limits (about 5 requests per 30 s without an API key) and stops after a time budget,
+    so a run never takes long; the next scan continues where it stopped. The given systems' CVEs go first."""
     if not settings.nvd_enabled:
         return 0
-    rows = db.q("""SELECT DISTINCT f.cve FROM findings f LEFT JOIN nvd_cache n ON n.cve=f.cve
-                   WHERE f.cve IS NOT NULL AND f.status='open' AND n.cve IS NULL LIMIT ?""", (limit,))
-    if not rows:
+    cves = nvd_pending(host_ids, limit)
+    if not cves:
         return 0
+    if budget is None:
+        budget = settings.nvd_budget_seconds or (600 if settings.nvd_api_key else 90)
+    deadline = asyncio.get_running_loop().time() + budget
+    rows = [{"cve": c} for c in cves]
     delay = 0.7 if settings.nvd_api_key else 6.5
     headers = {"apiKey": settings.nvd_api_key} if settings.nvd_api_key else {}
     n = 0
@@ -296,8 +316,10 @@ async def nvd_enrich(limit: int = 200) -> int:
                          (cve, score, norm_sev(sev) if sev else "UNKNOWN", vector, desc, db.now()))
                     n += 1
                 elif resp.status_code in (403, 429):
-                    await asyncio.sleep(30)
+                    break  # rate limited: stop this run, the next one continues
             except httpx.HTTPError:
+                break
+            if asyncio.get_running_loop().time() + delay > deadline:
                 break
             await asyncio.sleep(delay)
     apply_enrichment()

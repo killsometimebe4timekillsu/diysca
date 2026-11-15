@@ -198,6 +198,7 @@ async def scan_one(host_id: int):
     async def run():
         await scanner.refresh_kev()
         await scanner.scan_host(host_id)
+        scanner.start_nvd_enrichment([host_id])
     _bg_run(run())
     return RedirectResponse(f"/systems/{host_id}", 303)
 
@@ -347,7 +348,9 @@ async def api_scan(host: str | None = None, hosts: str | None = None, id: list[i
         h = db.q1("SELECT id FROM hosts WHERE name=?", (host,))
         if not h or not scope.allows(h["id"]):
             raise HTTPException(404)
-        return await scanner.scan_host(h["id"])
+        res = await scanner.scan_host(h["id"])
+        scanner.start_nvd_enrichment([h["id"]])
+        return res
     sel = scanner.select_hosts(hosts, id)
     if (hosts or id) and not sel:
         raise HTTPException(404, "no system matches")

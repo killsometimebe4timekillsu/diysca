@@ -41,6 +41,7 @@ class Settings:
     osv_bulk_hours: float = 12  # re-download bulk data after this many hours
     nvd_enabled: bool = True
     nvd_api_key: str = ""
+    nvd_budget_seconds: float = 0  # time per enrichment run; 0 = 90 s without an API key, 600 s with one
     nvd_url: str = "https://services.nvd.nist.gov/rest/json/cves/2.0"
     kev_enabled: bool = True
     kev_url: str = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"

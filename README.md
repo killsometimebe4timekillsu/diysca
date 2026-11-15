@@ -232,7 +232,7 @@ GitHub Actions and GitLab CI examples: [docs/mitigations.md](docs/mitigations.md
 ## Known limitations / roadmap
 
 * yum/dnf repos that only use `mirrorlist` or `metalink` are not indexed (set `baseurl`).
-* NVD without an API key is slow (about 5 CVEs per 30 s). Get a free key.
+* NVD without an API key is slow (about 5 CVEs per 30 s), so CVSS scores from NVD fill in over several runs. Scans don't wait for it. Get a free key.
 * Images without `/bin/sh` (distroless, scratch) can't be scanned through `exec`.
 * Language packages are reported with a fix version and their location. Upgrading them is left to the application's own build, and the playbook lists them as manual items.
 * Fat jars that nest other jars are only read one level deep.
