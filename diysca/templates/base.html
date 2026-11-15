@@ -184,7 +184,7 @@ footer{margin-left:56px;padding:8px 16px 16px;color:var(--muted);font-size:12px}
 {% block content %}{% endblock %}
 </main>
 </div>
-<footer>diysca {{ version }} · vulnerability data: OSV.dev, NVD, CISA KEV{% if extra_source_names %}, {{ extra_source_names }}{% endif %}</footer>
+<footer>diysca {{ version }} · vulnerability data: OSV.dev, NVD, CISA KEV{% if extra_source_names %}, {{ extra_source_names }}{% endif %} · <span title="Written largely with an AI coding assistant and not audited. Review generated playbooks before running them; findings are a starting point, not a guarantee.">AI-generated code, provided as is</span></footer>
 <script>
 document.getElementById("navbtn").addEventListener("click",function(){
   var r=document.documentElement,w=r.dataset.nav==="wide";if(w)delete r.dataset.nav;else r.dataset.nav="wide";

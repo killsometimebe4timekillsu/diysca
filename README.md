@@ -2,6 +2,13 @@
 
 diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent, and it has no SaaS dependency. It ships as a native package (deb/rpm), an OCI image, an AppImage and a Flatpak.
 
+> [!WARNING]
+> **AI-generated code.** diysca was written largely with an AI coding assistant (Claude) and reviewed by a person,
+> but not audited. It connects to your systems over SSH and can generate and hand off patch playbooks, so
+> review what it does before you trust it in production: read generated playbooks before running them, give
+> its SSH user and API tokens only the rights they need, and treat findings as a starting point, not a
+> guarantee that a system is (or isn't) vulnerable. Provided as is, without warranty (MIT license).
+
 * **Public CVE sources:** [OSV.dev](https://osv.dev) is the main source. It aggregates the Debian, Ubuntu, Alpine, AlmaLinux, Rocky, SUSE and Red Hat security trackers, with exact fixed versions per distro release. **NVD** adds CVSS scores and descriptions, and **CISA KEV** flags known exploited CVEs.
 * **More CVE sources, your own included:** the Debian security tracker (adds CVEs Debian hasn't fixed yet), Alpine secdb, FIRST **EPSS** exploit probabilities, any OSV-format feed (a GHSA export, Go vulndb, your own advisories), and **custom JSON / YAML / CSV feeds** mapped field by field. Configure them in `config.yml` or on the **CVE sources** page. See [CVE sources](#cve-sources).
 * **Local systems:** hosts are scanned agentless over SSH (or locally) for installed `dpkg`, `rpm` and `apk` packages. No root is needed.
