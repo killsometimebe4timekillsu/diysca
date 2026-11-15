@@ -247,7 +247,7 @@ def api_mitigations(status: str = "open"):
 async def api_mitigation_create(request: Request):
     """Body (JSON): `finding_ids` (list) or `filter` (a findings query string, e.g. `host=web1&fix=repo`),
     optional `note`, `handoff` (target name; without it, targets marked *auto* are used) and `rescan` (default
-    true). Only open findings are taken. Token holders may approve only when `agents_can_approve` is set."""
+    true). Only open findings are taken. Token holders may approve when `agents_can_approve` is set, or when their token has `role: approver` or higher."""
     require(request, "approver")
     body = await request.json()
     ids = [int(i) for i in body.get("finding_ids") or []]

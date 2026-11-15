@@ -9,13 +9,13 @@ from fastapi import HTTPException, Request
 from fastapi.templating import Jinja2Templates
 
 from diysca import __version__
-from diysca.core import db, modules, scope
+from diysca.core import db, modules, scope, security
 from diysca.scanning import scanner
 from diysca.scanning.feeds import SEVERITY_ORDER, sev_rank
 
 BASE = Path(__file__).parent
 templates = Jinja2Templates(directory=str(BASE / "templates"))
-templates.env.globals.update(version=__version__, sev_rank=sev_rank, has_module=modules.enabled,
+templates.env.globals.update(version=__version__, ui_open=security.ui_open, sev_rank=sev_rank, has_module=modules.enabled,
                              nav_items=modules.nav, module_tabs=modules.tabs, tab_group=modules.tab_group,
                              settings_tab_list=modules.settings_tabs)
 PAGE_ALIASES = {"system": "systems", "finding": "findings", "mitigation": "mitigations"}

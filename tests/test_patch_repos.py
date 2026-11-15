@@ -30,7 +30,7 @@ def test_playbook():
     text, summary = build_playbook(ids)
     assert summary == {"hosts": 1, "packages": 2, "manual": 2}
     assert "Fix released but not yet in your repos" in text and "openssl 3.0.15-1 -> 3.0.16-1" in text
-    assert "PyPI requests 2.20.0 -> 2.31.0" in text
+    assert "PyPI requests 2.20.0 -> >= 2.31.0" in text
     plays = yaml.safe_load(text.split("\n---\n", 1)[1])
     assert plays[0]["hosts"] == "system_a"
     apt = plays[0]["tasks"][0]["ansible.builtin.apt"]
@@ -132,3 +132,15 @@ def test_foreman(monkeypatch):
     assert res.ok, [(s.action, s.detail) for s in res.steps]
     assert ("POST", "/katello/api/content_view_versions/51/promote", {"environment_ids": [2], "force": False}) in calls
     assert not any(c[1].endswith("/promote") and c[2]["environment_ids"] == [3] for c in calls)
+
+
+
+def test_playbook_groups_language_package_cves():
+    h = db.x("INSERT INTO hosts(name,address,pkg_type,os_id) VALUES ('php1','10.0.0.12','deb','debian')")
+    ids = [db.x("""INSERT INTO findings(host_id,package,version,ecosystem,location,vuln_id,fixed_version,fix_in_repo,severity,status)
+                   VALUES (?,'guzzlehttp/guzzle','7.4.0','Packagist','/var/www/shop',?,?,0,'HIGH','open')""", (h, cve, fix))
+           for cve, fix in (("CVE-2022-29248", "7.4.3"), ("CVE-2022-31090", "7.4.5"), ("CVE-2026-69246", "7.15.2"))]
+    text, _ = build_playbook(ids)
+    lines = [ln for ln in text.splitlines() if "guzzle" in ln]
+    assert len(lines) == 1
+    assert "7.4.0 -> >= 7.15.2 (CVE-2022-29248, CVE-2022-31090, CVE-2026-69246) in /var/www/shop" in lines[0]

@@ -76,6 +76,10 @@ def get(mid: int, with_playbook: bool = True) -> dict | None:
     out["findings"] = _findings(mid)
     out["hosts"] = sorted({f["host"] for f in out["findings"]})
     out["open_findings"] = sum(1 for f in out["findings"] if f["status"] == "open")
+    # Same fields as the patch log: when it ended, and how many findings the rescan confirmed fixed.
+    out["finished_at"] = m["updated_at"] if m["status"] in ("done", "failed", "cancelled") else None
+    n = len(out["findings"])
+    out["verified"] = f"{sum(1 for f in out['findings'] if f['status'] == 'resolved')}/{n}" if n else ""
     out["links"] = links(mid)
     if not with_playbook:
         out.pop("playbook", None)
