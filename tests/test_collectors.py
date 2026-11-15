@@ -65,3 +65,27 @@ def test_full_output():
     assert f.os_id == "debian" and f.os_version == "12" and f.deb_arch == "amd64"
     assert f.packages[0].source_version == "5.2.15-2" and f.pkg_type == "deb"
     assert len(f.repos) == 1
+
+
+def test_apache_modules():
+    from diysca.scanning.collectors import SEP, parse_collect_output
+    out = f"""{SEP}os-release
+ID=debian
+VERSION_ID="13"
+{SEP}dpkg
+apache2-bin\t2.4.65-2\tamd64\tapache2\tinstalled
+libapache2-mod-php8.4\t8.4.11-1\tamd64\tphp8.4\tinstalled
+{SEP}apache
+M\tphp_module\t/usr/lib/apache2/modules/libphp8.4.so\tlibapache2-mod-php8.4
+M\tsecurity3_module\t/usr/local/lib/mod_security3.so\t
+M\tssl_module\t/usr/lib/apache2/modules/mod_ssl.so\tapache2-bin
+S\tApache/2.4.65 (Debian)\t/usr/sbin/apache2\tapache2-bin
+{SEP}end
+"""
+    f = parse_collect_output(out)
+    mods = {m["name"]: m for m in f.apache}
+    assert mods["php_module"]["version"] == "8.4.11-1" and mods["php_module"]["managed"]
+    assert not mods["security3_module"]["managed"] and mods["security3_module"]["version"] == "unknown"
+    assert mods["httpd"]["version"] == "2.4.65-2" and mods["httpd"]["server"].startswith("Apache/2.4.65")
+    f2 = parse_collect_output(out.replace("\t/usr/sbin/apache2\tapache2-bin", "\t/usr/local/apache2/bin/httpd\t"))
+    assert {m["name"]: m for m in f2.apache}["httpd"]["version"] == "2.4.65"

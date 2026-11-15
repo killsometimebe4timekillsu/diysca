@@ -38,6 +38,8 @@ def build_sbom(host_id: int) -> dict:
     distro = f"{h['os_id']}-{h['os_version']}" if h["os_id"] else ""
     comps, refs = [], {}
     for p in db.q("SELECT * FROM packages WHERE host_id=? ORDER BY ecosystem, name", (host_id,)):
+        if p["ecosystem"] == "Apache" and p["source_name"]:
+            continue  # module shipped by an OS package: that package is in the SBOM already
         if p["ecosystem"]:
             ref = lang_purl(p["ecosystem"], p["name"], p["version"])
             c = {"type": "library", "bom-ref": f"{ref}#{len(comps)}", "name": p["name"], "version": p["version"],
