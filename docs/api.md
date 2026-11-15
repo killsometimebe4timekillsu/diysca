@@ -235,7 +235,7 @@ JSON-RPC 2.0 for MCP clients (`initialize`, `tools/list`, `tools/call`, `ping`).
 
 ### GET /healthz
 
-`{"ok": true, "version": "0.2.1"}`, without authentication. Use it for container and orchestrator probes.
+`{"ok": true, "version": "0.2.2"}`, without authentication. Use it for container and orchestrator probes.
 
 ## Examples
 

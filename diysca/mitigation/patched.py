@@ -59,6 +59,7 @@ def window(rng: str, frm: str = "", to: str = "", now: datetime | None = None):
 def query(args: dict, now: datetime | None = None) -> dict:
     rng, start, end, label = window(args.get("range") or "last", args.get("from", ""), args.get("to", ""), now)
     where, p = ["f.status='resolved'" + scope.clause("f.host_id")], []
+    still, sp = ["f.status='open'" + scope.clause("f.host_id")], []  # "still open" under the same system filters
     if rng == "last":
         where.append("""f.resolved_at = (SELECT MAX(f2.resolved_at) FROM findings f2
                                          WHERE f2.host_id=f.host_id AND f2.status='resolved')""")
@@ -66,19 +67,21 @@ def query(args: dict, now: datetime | None = None) -> dict:
         where += ["f.resolved_at >= ?", "f.resolved_at <= ?"]
         p += [start, end]
     if args.get("host"):
-        where.append("h.name LIKE ?")
-        p.append("%" + args["host"].replace("*", "%") + "%")
+        for w, q in ((where, p), (still, sp)):
+            w.append("h.name LIKE ?")
+            q.append("%" + args["host"].replace("*", "%") + "%")
     if args.get("group"):
-        where.append("(',' || h.groups || ',') LIKE ?")
-        p.append(f"%,{args['group']},%")
+        for w, q in ((where, p), (still, sp)):
+            w.append("(',' || h.groups || ',') LIKE ?")
+            q.append(f"%,{args['group']},%")
     if args.get("severity") in SEVERITY_ORDER:
         allowed = [s for s in SEVERITY_ORDER if sev_rank(s) >= sev_rank(args["severity"])]
-        where.append(f"f.severity IN ({','.join('?' * len(allowed))})")
-        p += allowed
-    if args.get("eco") == "os":
-        where.append("f.ecosystem=''")
-    elif args.get("eco") == "lang":
-        where.append("f.ecosystem!=''")
+        for w, q in ((where, p), (still, sp)):
+            w.append(f"f.severity IN ({','.join('?' * len(allowed))})")
+            q.extend(allowed)
+    if args.get("eco") in ("os", "lang"):
+        for w in (where, still):
+            w.append("f.ecosystem=''" if args["eco"] == "os" else "f.ecosystem!=''")
     if args.get("how") in ("upgraded", "removed", "not-affected"):
         where.append("f.resolution=?")
         p.append(args["how"])
@@ -104,7 +107,8 @@ def query(args: dict, now: datetime | None = None) -> dict:
         "median_days": round(median(days), 1) if days else None,
         "upgraded": sum(1 for r in rows if r["resolution"] == "upgraded"),
         "removed": sum(1 for r in rows if r["resolution"] == "removed"),
-        "open_now": db.q1(f"SELECT COUNT(*) n FROM findings WHERE status='open'{scope.clause('host_id')}")["n"],
+        "open_now": db.q1(f"SELECT COUNT(*) n FROM findings f JOIN hosts h ON h.id=f.host_id "
+                          f"WHERE {' AND '.join(still)}", sp)["n"],
     }
     if rng == "last" and rows:
         start = min(r["resolved_at"] for r in rows)
