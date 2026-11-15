@@ -8,13 +8,17 @@
 <p>Address <span class="mono">{{ h.address }}:{{ h.port }}</span> · user {{ h.ssh_user or 'default' }} · {{ h.connection }} ·
  arch {{ h.arch or '?' }} · kernel {{ h.kernel or '?' }} · OSV ecosystem <span class="mono">{{ h.ecosystem or '–' }}</span> ·
  groups {% for g in (h.groups or '').split(',') if g %}<span class="tag">{{ g }}</span>{% endfor %} · source {{ h.source }} · last scan {{ h.last_scan or 'never' }}</p>
+<p><a href="#repos">Repositories ({{ repos|length }})</a> · <a href="#findings">Open findings ({{ findings|length }})</a> · <a href="#packages">Installed packages ({{ pkgs|length }})</a></p>
 <form method="post" action="/systems/{{ h.id }}/scan" class="inline"><button>Scan now</button></form>
 {% if h.kind != 'container' %}<form method="post" action="/patch/playbook" class="inline"><input type="hidden" name="host_id" value="{{ h.id }}"><button class="secondary">Patch playbook</button></form>{% endif %}
 <a class="btn secondary" href="/systems/{{ h.id }}/sbom.json">Download SBOM (CycloneDX)</a>
 {% if h.kind != 'container' %}<a class="btn secondary" href="/systems/{{ h.id }}/reprovision.yml" title="Ansible playbook that rebuilds this system from its SBOM, with fixable vulnerabilities fixed">Reprovision playbook</a>{% endif %}
 <form method="post" action="/systems/{{ h.id }}/delete" class="inline" onsubmit="return confirm('Delete {{ h.name }}?')"><button class="danger">Delete</button></form>
 </div>
-<div class="card"><h2>Open findings ({{ findings|length }})</h2>
+{% set bad = repos|selectattr('status','equalto','error')|list|length %}<div class="card" id="repos"><h2>Repositories ({{ repos|length }}){% if bad %} <span class="bad" style="font-size:13px">{{ bad }} could not be read</span>{% endif %}</h2>
+<p class="muted">The package repositories configured on this system, as read at the last scan. "Your repos offer" below comes from their indexes.</p>
+{{ m.repo_table(repos) }}</div>
+<div class="card" id="findings"><h2>Open findings ({{ findings|length }})</h2>
 <table><tr><th>Severity</th><th>CVE</th><th>Package</th><th>Installed</th><th>Fixed in</th><th>Your repos offer</th><th>Summary</th></tr>
 {% for f in findings %}<tr><td>{{ m.sev(f.severity) }} {% if f.cvss_score %}<span class="muted">{{ '%.1f'|format(f.cvss_score) }}</span>{% endif %} {% if f.kev %}<span class="kev">KEV</span>{% endif %}</td>
 <td><a href="/findings/{{ f.id }}">{{ f.vuln_id }}</a></td><td>{% if f.ecosystem %}<span class="tag">{{ f.ecosystem }}</span> {% endif %}{{ f.package }}<br><small class="muted">{{ f.binaries }}</small></td>
@@ -22,12 +26,7 @@
 <td class="mono {{ 'ok' if f.fix_in_repo else ('bad' if f.fixed_version) }}">{{ f.repo_version or '–' }}{{ ' ✔' if f.fix_in_repo }}</td>
 <td><small>{{ (f.summary or '')[:140] }}</small></td></tr>
 {% else %}<tr><td colspan="7" class="muted">No open findings 🎉</td></tr>{% endfor %}</table></div>
-<div class="card"><h2>Configured repositories ({{ repos|length }})</h2>
-<table><tr><th>Kind</th><th>URL</th><th>Suite / name</th><th>Components</th><th>Index</th><th>Packages</th><th>File</th></tr>
-{% for r in repos %}<tr><td>{{ r.kind }}</td><td class="mono">{{ r.url }}</td><td>{{ r.suite }} {{ r.name }}</td><td>{{ r.components }}</td>
-<td class="{{ 'ok' if r.status=='ok' else 'bad' if r.status=='error' }}" title="{{ r.error or '' }}">{{ r.status }}{% if r.error %}: <small>{{ r.error[:80] }}</small>{% endif %}</td>
-<td>{{ r.pkg_count }}</td><td class="muted mono">{{ r.file }}</td></tr>{% endfor %}</table></div>
-<div class="card"><h2>Installed packages ({{ pkgs|length }})</h2>
+<div class="card" id="packages"><h2>Installed packages ({{ pkgs|length }})</h2>
 <form class="filters" method="get"><label>Filter<input name="pkg" value="{{ args.pkg or '' }}" placeholder="postgres"></label><button>Filter</button></form>
 <table><tr><th>Package</th><th>Version</th><th>Arch</th><th>Source</th><th>Repo candidate</th><th>Vulns</th></tr>
 {% for p in pkgs %}<tr><td>{% if p.ecosystem %}<span class="tag">{{ p.ecosystem }}</span> {% endif %}{{ p.name }}{% if p.location %}<br><small class="muted">{{ p.location }}</small>{% endif %}</td><td class="mono">{{ p.version }}</td><td>{{ p.arch }}</td><td>{{ p.source_name if p.source_name != p.name }}</td>

@@ -56,6 +56,7 @@ both with `allow_no_login: true`. After 5 failed logins an address has to wait (
 | GET | `/api/packages` | installed packages |
 | GET | `/api/findings` | findings (vulnerable packages) |
 | GET | `/api/findings/{id}` | one finding |
+| GET | `/api/hosts/{id}/repos` | package repositories of a system, with the result of reading each index |
 | GET | `/api/hosts/{id}/sbom` | CycloneDX SBOM of a system |
 | GET | `/api/patched` | patched findings in a time range |
 | GET | `/api/sources` | extra vulnerability sources |
@@ -132,6 +133,16 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/findings?group=prod&severit
 ### GET /api/findings/{id}
 
 One finding (all fields above) plus `mitigation`: the mitigation it was last approved in, or `null`.
+
+### GET /api/hosts/{id}/repos
+
+The repositories configured on the system, as read at its last scan. Each has `kind` (`apt`, `yum`, `apk`), `url`,
+`suite`, `components`, `name`, `file`, `enabled`, `status` (`ok`, `error`, `disabled`, `skipped`), `error` (why the
+index could not be read, or a note such as the priority of a backports repo), `pkg_count` and `fetched_at`.
+
+```sh
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/hosts/3/repos" | jq '.[] | select(.status=="error")'
+```
 
 ### GET /api/hosts/{id}/sbom
 
@@ -235,7 +246,7 @@ JSON-RPC 2.0 for MCP clients (`initialize`, `tools/list`, `tools/call`, `ping`).
 
 ### GET /healthz
 
-`{"ok": true, "version": "0.2.2"}`, without authentication. Use it for container and orchestrator probes.
+`{"ok": true, "version": "0.2.3"}`, without authentication. Use it for container and orchestrator probes.
 
 ## Examples
 

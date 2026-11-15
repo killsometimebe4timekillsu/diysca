@@ -48,8 +48,20 @@ def _mitigation(mid):
 def systems(request: Request):
     args = dict(request.query_params)
     sql, p = hosts_query(args)
-    return render(request, "systems.html", hosts=db.q(sql, p), args=args, groups=all_groups(),
-                  inventories=settings.inventories)
+    hosts = db.q(sql, p)
+    return render(request, "systems.html", hosts=hosts, args=args, groups=all_groups(),
+                  inventories=settings.inventories, repos=_repos_by_host([h["id"] for h in hosts]))
+
+
+def _repos_by_host(host_ids: list[int]) -> dict[int, list]:
+    """The repos of the listed systems, for the repo list in the Systems table."""
+    out: dict[int, list] = {}
+    for i in range(0, len(host_ids), 500):
+        part = host_ids[i:i + 500]
+        for r in db.q(f"SELECT * FROM repos WHERE host_id IN ({','.join('?' * len(part))}) ORDER BY kind, url, suite",
+                      part):
+            out.setdefault(r["host_id"], []).append(r)
+    return out
 
 
 @router.get("/systems/{host_id}")
@@ -62,7 +74,7 @@ def system_detail(request: Request, host_id: int):
     fsql, fp = finding_query({**args, "host": None})
     fsql = fsql.replace("WHERE 1=1", "WHERE f.host_id=?", 1)
     findings = db.q(fsql, [host_id] + fp)
-    repos = db.q("SELECT * FROM repos WHERE host_id=? ORDER BY kind, url", (host_id,))
+    repos = db.q("SELECT * FROM repos WHERE host_id=? ORDER BY kind, url, suite", (host_id,))
     pkgs = db.q("""SELECT pk.*, (SELECT COUNT(*) FROM findings f WHERE f.host_id=pk.host_id AND f.status='open'
                      AND f.ecosystem=pk.ecosystem AND (f.package=pk.source_name OR f.package=pk.name)) AS vuln_count
                    FROM packages pk WHERE host_id=? AND (pk.name LIKE ? OR pk.source_name LIKE ?) ORDER BY vuln_count DESC, name""",
@@ -301,6 +313,19 @@ def api_hosts(request: Request):
     Query parameters: `host` (name or address, `*` wildcards), `group`, `os`, `kind` (`host` / `container`)."""
     sql, p = hosts_query(dict(request.query_params))
     return rows(db.q(sql, p))
+
+
+@router.get("/api/hosts/{host_id}/repos", tags=["inventory"], summary="Package repositories of a system")
+def api_host_repos(host_id: int):
+    """The repositories configured on the system, as read at its last scan: `kind` (`apt`, `yum`, `apk`), `url`
+    (apt mirror lists are resolved to the real URL), `suite`, `components`, `name`, `file` (where it is
+    configured), `enabled`, `status` (`ok`, `error`, `disabled`, `skipped`), `error` (why the index could not be
+    read, or a note such as the apt priority of a backports repo), `pkg_count` and `fetched_at`."""
+    check_host(host_id)
+    if not db.q1("SELECT id FROM hosts WHERE id=?", (host_id,)):
+        raise HTTPException(404)
+    return rows(db.q("""SELECT kind, url, suite, components, name, file, enabled, status, error, pkg_count, fetched_at
+                        FROM repos WHERE host_id=? ORDER BY kind, url, suite""", (host_id,)))
 
 
 @router.get("/api/packages", tags=["inventory"], summary="List installed packages")
