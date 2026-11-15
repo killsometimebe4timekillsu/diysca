@@ -38,7 +38,7 @@ JSON API of diysca, the self-hosted CVE scanner and patcher. The full guide with
 
 **Authentication.** People log in with OIDC (auth module) or HTTP basic auth (`web_user` / `web_password`).
 Agents, CI/CD jobs and MCP clients send `Authorization: Bearer <token>` with a token from `api_tokens`. Tokens
-only open `/api/*` and `/mcp`. Without any login configured, everything is open (lab setups only).
+only open `/api/*` and `/mcp`. Without any login configured, everything is open, and diysca only listens on 127.0.0.1.
 
 **Roles.** With the auth module: `viewer` reads, `operator` scans and runs mitigations, `approver` approves,
 `admin` changes settings. Roles can be limited to some systems; lists and counts then only show those.

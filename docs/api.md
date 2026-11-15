@@ -32,8 +32,10 @@ tokens get them per token: `api_tokens: {ci: {token: "…", role: operator, host
 the role answers `403`, systems outside the scope are invisible (`404`). `GET /api/me` shows who you are. See
 [auth.md](auth.md).
 
-Without `web_user`/`web_password` and without `api_tokens`, everything is open; only do that in a lab. Once
-`api_tokens` are set, `/api/*` always needs a token or the basic-auth login.
+Without any login configured, everything is open, and diysca then only listens on `127.0.0.1`. Once
+`api_tokens` are set, `/api/*` always needs a token or the basic-auth login, and the web pages need a login for
+people too (`web_user` / `web_password` or OIDC), because an open UI would bypass the tokens' roles. A lab can lift
+both with `allow_no_login: true`. After 5 failed logins an address has to wait (`429` with `Retry-After`).
 
 ## Conventions
 

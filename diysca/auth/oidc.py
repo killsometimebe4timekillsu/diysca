@@ -10,8 +10,10 @@ Works with Keycloak, Microsoft Entra ID, Authentik, Zitadel, Okta, Google, GitLa
       username_claim: preferred_username
       groups_claim: groups        # dotted paths work: realm_access.roles
 
-The ID token comes straight from the provider's token endpoint over TLS, so (as the OIDC spec allows for
-this flow) its signature isn't checked; issuer, audience, expiry and nonce are.
+      verify_signature: true      # check the ID token's signature against the provider's keys (jwks_uri)
+
+The ID token's signature is checked against the provider's published keys (RS*, PS*, ES* algorithms, or HS*
+with the client secret), and so are issuer, audience, expiry and nonce. "alg: none" is always refused.
 """
 from __future__ import annotations
 
@@ -86,12 +88,109 @@ def start(next_url: str = "/", transport=None) -> tuple[str, dict]:
         {"state": state, "nonce": nonce, "verifier": verifier, "next": safe_next(next_url)}
 
 
+def _b64d(s: str) -> bytes:
+    return base64.urlsafe_b64decode(s + "=" * (-len(s) % 4))
+
+
 def _claims_from_jwt(token: str) -> dict:
     try:
-        payload = token.split(".")[1]
-        return json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+        return json.loads(_b64d(token.split(".")[1]))
     except (IndexError, ValueError) as e:
         raise OIDCError("malformed ID token") from e
+
+
+# ------------------------------------------------------------------ signatures
+_jwks_cache: dict[str, dict] = {}
+_HASH = {"256": "SHA256", "384": "SHA384", "512": "SHA512"}
+
+
+def _jwks(d: dict, transport=None, refresh: bool = False) -> list[dict]:
+    uri = d.get("jwks_uri")
+    if not uri:
+        raise OIDCError("the provider publishes no jwks_uri, so the ID token signature can't be checked")
+    cached = _jwks_cache.get(uri)
+    if cached and not refresh and cached["_at"] > time.time() - 3600:
+        return cached["keys"]
+    with (httpx.Client(transport=transport) if transport else _client()) as c:
+        r = c.get(uri)
+    if r.status_code != 200:
+        raise OIDCError(f"loading the provider's keys failed: HTTP {r.status_code}")
+    keys = [k for k in (r.json().get("keys") or []) if isinstance(k, dict)]
+    _jwks_cache[uri] = {"_at": time.time(), "keys": keys}
+    return keys
+
+
+def _public_key(jwk: dict):
+    from cryptography.hazmat.primitives.asymmetric import ec, rsa
+    if jwk.get("kty") == "RSA":
+        n, e = (int.from_bytes(_b64d(jwk[k]), "big") for k in ("n", "e"))
+        return rsa.RSAPublicNumbers(e, n).public_key()
+    if jwk.get("kty") == "EC":
+        curve = {"P-256": ec.SECP256R1, "P-384": ec.SECP384R1, "P-521": ec.SECP521R1}[jwk["crv"]]()
+        x, y = (int.from_bytes(_b64d(jwk[k]), "big") for k in ("x", "y"))
+        return ec.EllipticCurvePublicNumbers(x, y, curve).public_key()
+    raise OIDCError(f"unsupported key type {jwk.get('kty')}")
+
+
+def _check(alg: str, key_or_secret, signed: bytes, sig: bytes) -> bool:
+    import hmac as _hmac
+
+    from cryptography.exceptions import InvalidSignature
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec, padding
+    from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
+    h = getattr(hashes, _HASH[alg[2:]])()
+    try:
+        if alg.startswith("HS"):
+            return _hmac.compare_digest(_hmac.new(key_or_secret, signed, alg.replace("HS", "sha")).digest(), sig)
+        if alg.startswith("RS"):
+            key_or_secret.verify(sig, signed, padding.PKCS1v15(), h)
+        elif alg.startswith("PS"):
+            key_or_secret.verify(sig, signed, padding.PSS(padding.MGF1(h), h.digest_size), h)
+        elif alg.startswith("ES"):
+            half = len(sig) // 2
+            der = encode_dss_signature(int.from_bytes(sig[:half], "big"), int.from_bytes(sig[half:], "big"))
+            key_or_secret.verify(der, signed, ec.ECDSA(h))
+        else:
+            return False
+        return True
+    except InvalidSignature:
+        return False
+
+
+ALGS = {f"{p}{n}" for p in ("RS", "PS", "ES", "HS") for n in ("256", "384", "512")}
+
+
+def verify_signature(token: str, d: dict, transport=None):
+    """Raise OIDCError unless `token` is signed by one of the provider's keys (or, for HS*, the client secret)."""
+    try:
+        head_b64, body_b64, sig_b64 = token.split(".")
+        header, sig = json.loads(_b64d(head_b64)), _b64d(sig_b64)
+    except ValueError as e:
+        raise OIDCError("malformed ID token") from e
+    alg = str(header.get("alg") or "")
+    if alg not in ALGS:
+        raise OIDCError(f"ID token: algorithm '{alg}' is not accepted")
+    signed = f"{head_b64}.{body_b64}".encode()
+    if alg.startswith("HS"):
+        if not _secret() or not _check(alg, _secret().encode(), signed, sig):
+            raise OIDCError("ID token: bad signature")
+        return
+    kty = "EC" if alg.startswith("ES") else "RSA"
+    for refresh in (False, True):  # unknown kid: the provider may have rotated its keys
+        keys = [k for k in _jwks(d, transport, refresh) if k.get("kty") == kty and k.get("use", "sig") == "sig"
+                and (not header.get("kid") or k.get("kid") == header["kid"])]
+        if keys:
+            break
+    if not keys:
+        raise OIDCError("ID token: no provider key matches it")
+    for k in keys:
+        try:
+            if _check(alg, _public_key(k), signed, sig):
+                return
+        except (KeyError, ValueError):
+            continue
+    raise OIDCError("ID token: bad signature")
 
 
 def claim(claims: dict, path: str):
@@ -119,6 +218,8 @@ def finish(code: str, state: str, flow: dict, transport=None) -> dict:
         tok = r.json()
         if "id_token" not in tok:
             raise OIDCError("the provider returned no ID token (is 'openid' in scopes?)")
+        if settings.oidc.get("verify_signature", True) is not False:
+            verify_signature(tok["id_token"], d, transport)
         claims = _claims_from_jwt(tok["id_token"])
         iss = d["issuer"].rstrip("/")
         aud = claims.get("aud")

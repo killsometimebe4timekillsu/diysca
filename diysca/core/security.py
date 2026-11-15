@@ -57,10 +57,98 @@ def token_user(name: str, conf: dict) -> User:
     return User(name=f"token:{name}", role=role, kind="token", hosts=hosts)
 
 
+def web_login_configured() -> bool:
+    """A login for people: basic auth, or OIDC with the auth module on."""
+    if settings.web_user and settings.web_password:
+        return True
+    from diysca.auth import oidc
+    from diysca.core import modules
+    return modules.enabled("auth") and oidc.configured()
+
+
 def ui_open() -> bool:
     """True when no login is configured for the web UI: anyone who reaches the port acts as admin."""
-    from diysca.auth import oidc
-    return not (settings.web_user and settings.web_password) and not oidc.configured()
+    return not web_login_configured()
+
+
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def open_listen_error(host: str) -> str | None:
+    """Why `diysca serve --host <host>` must not start, or None."""
+    if ui_open() and host not in LOOPBACK and not settings.allow_no_login:
+        return (f"No login is configured, so everyone who can reach {host} would be an admin. Set web_user and "
+                "web_password (or OIDC, see docs/auth.md), or listen on 127.0.0.1. For a lab without a login, set "
+                "allow_no_login: true (env DIYSCA_ALLOW_NO_LOGIN=true).")
+    return None
+
+
+def tokens_need_web_login(path: str) -> bool:
+    """API tokens are set but people have no login: the web pages would bypass every token role and scope."""
+    return bool(settings.api_tokens) and not machine_path(path) and ui_open() and not settings.allow_no_login
+
+
+TOKENS_WITHOUT_LOGIN = ("API tokens are configured, but there is no login for the web UI, so the UI would bypass "
+                        "the tokens' roles. Set web_user and web_password (or OIDC, see docs/auth.md), or "
+                        "allow_no_login: true for a lab.")
+
+
+# ------------------------------------------------------------------ failed logins
+class LoginLimiter:
+    """Counts failed logins per client address. After `login_max_failures` the address waits
+    `login_lockout_seconds`, doubling with every further failure (at most 1 h). A success clears it."""
+
+    def __init__(self):
+        self._fails: dict[str, list] = {}  # ip -> [count, blocked_until, last_failure]
+
+    def retry_after(self, ip: str) -> int:
+        import time
+        e = self._fails.get(ip)
+        if not e:
+            return 0
+        left = e[1] - time.time()
+        return int(left) + 1 if left > 0 else 0
+
+    def failed(self, ip: str):
+        import time
+        now = time.time()
+        if len(self._fails) > 10000:  # forget the oldest, never grow without bound
+            for k in sorted(self._fails, key=lambda k: self._fails[k][2])[:5000]:
+                del self._fails[k]
+        e = self._fails.setdefault(ip, [0, 0.0, now])
+        if now - e[2] > 24 * 3600:
+            e[0] = 0
+        e[0] += 1
+        e[2] = now
+        over = e[0] - settings.login_max_failures
+        if settings.login_max_failures > 0 and over >= 0:
+            e[1] = now + min(settings.login_lockout_seconds * (2 ** min(over, 20)), 3600)
+
+    def ok(self, ip: str):
+        self._fails.pop(ip, None)
+
+    def reset(self):
+        self._fails.clear()
+
+
+limiter = LoginLimiter()
+
+
+def client_ip(request: Request) -> str:
+    return request.client.host if request.client else "?"
+
+
+def check_not_locked(request: Request):
+    wait = limiter.retry_after(client_ip(request))
+    if wait:
+        raise HTTPException(429, f"too many failed logins from this address; try again in {wait} s",
+                            headers={"Retry-After": str(wait)})
+
+
+def login_failed(request: Request, detail: str, headers: dict) -> HTTPException:
+    """Count the failure and return the 401 to raise."""
+    limiter.failed(client_ip(request))
+    return HTTPException(401, detail, headers=headers)
 
 
 def _same(a: str, b: str) -> bool:
@@ -106,22 +194,33 @@ def set_user(request: Request, user: User):
 
 
 async def authenticate(request: Request, creds: HTTPBasicCredentials | None = Depends(_basic)):
-    """Core rules: tokens open /api/* and /mcp; basic auth opens everything; nothing configured = open."""
+    """Core rules: tokens open /api/* and /mcp; basic auth opens everything; nothing configured = open
+    (on 127.0.0.1 only, see open_listen_error), except web pages while API tokens are set."""
     path = request.url.path
     set_user(request, User(name="web"))
     if path == "/healthz":
         return
     authz = request.headers.get("authorization", "")
+    if authz.lower().startswith("bearer ") or creds is not None:
+        check_not_locked(request)
     if authz.lower().startswith("bearer "):
         hit = token_entry(authz[7:].strip())
         if hit and machine_path(path):
+            limiter.ok(client_ip(request))
             set_user(request, token_user(*hit))
             return
-        raise HTTPException(401, "invalid API token" if not hit else "API tokens only work on /api/* and /mcp",
-                            headers={"WWW-Authenticate": "Bearer"})
+        if not hit:
+            raise login_failed(request, "invalid API token", {"WWW-Authenticate": "Bearer"})
+        raise HTTPException(401, "API tokens only work on /api/* and /mcp", headers={"WWW-Authenticate": "Bearer"})
     basic_on = bool(settings.web_user and settings.web_password)
     if basic_on or (settings.api_tokens and machine_path(path)):
         if basic_ok(creds):
+            limiter.ok(client_ip(request))
             set_user(request, User(name=creds.username, kind="basic"))
             return
-        raise HTTPException(401, headers={"WWW-Authenticate": "Basic" if basic_on else "Bearer"})
+        hdr = {"WWW-Authenticate": "Basic" if basic_on else "Bearer"}
+        if creds is not None:
+            raise login_failed(request, "wrong user name or password", hdr)
+        raise HTTPException(401, headers=hdr)
+    if tokens_need_web_login(path):
+        raise HTTPException(403, TOKENS_WITHOUT_LOGIN)

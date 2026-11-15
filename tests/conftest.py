@@ -19,6 +19,8 @@ def fresh_db(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "kev_enabled", False)
     monkeypatch.setattr(settings, "repo_fetch", "off")
     monkeypatch.setattr(settings, "scan_interval_hours", 0)
+    from diysca.core import security
+    security.limiter.reset()
     db.reset_for_tests()
     db.drop_all_for_tests()
     db.connect()

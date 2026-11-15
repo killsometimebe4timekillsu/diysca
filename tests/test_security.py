@@ -149,6 +149,7 @@ def test_inventory_import_only_reads_configured_paths(tmp_path, monkeypatch):
 def test_cross_site_changes_are_blocked(monkeypatch):
     monkeypatch.setattr(settings, "base_url", "https://diysca.example.org")
     monkeypatch.setattr(settings, "api_tokens", {"ci": {"token": "t1", "role": "admin"}})
+    monkeypatch.setattr(settings, "allow_no_login", True)  # a lab: tokens for the API, no login for the UI
     c = _client()
     form = {"name": "x", "address": "10.9.9.9"}
     assert c.post("/systems", data=form, headers={"Origin": "https://evil.example"}).status_code == 403
@@ -257,3 +258,81 @@ def test_login_cookie_and_flow_cookie_are_not_interchangeable(monkeypatch):
     assert rbac.user_from_cookie(Req(session.sign({"u": "old", "r": "admin"}, 600))) is None
     assert rbac.user_from_cookie(Req(session.sign({"t": "login", "u": "alice", "r": "viewer"}, 600))).name == "alice"
     assert os.stat(settings.data_dir).st_mode  # data dir exists
+
+
+# ------------------------------------------------------------------ open risks closed
+def test_serve_refuses_network_listen_without_login(monkeypatch):
+    monkeypatch.setattr(settings, "web_user", "")
+    monkeypatch.setattr(settings, "web_password", "")
+    assert security.open_listen_error("0.0.0.0") and security.open_listen_error("::")
+    assert security.open_listen_error("127.0.0.1") is None
+    monkeypatch.setattr(settings, "allow_no_login", True)
+    assert security.open_listen_error("0.0.0.0") is None
+    monkeypatch.setattr(settings, "allow_no_login", False)
+    monkeypatch.setattr(settings, "web_user", "admin")
+    monkeypatch.setattr(settings, "web_password", "pw")
+    assert security.open_listen_error("0.0.0.0") is None
+
+
+def test_tokens_without_web_login_close_the_ui(monkeypatch):
+    monkeypatch.setattr(settings, "api_tokens", {"ci": {"token": "t1", "role": "viewer"}})
+    c = _client()
+    r = c.get("/systems")
+    assert r.status_code == 403 and "no login for the web UI" in r.text
+    assert c.get("/api/hosts", headers={"Authorization": "Bearer t1"}).status_code == 200
+    assert c.get("/healthz").status_code == 200
+    monkeypatch.setattr(settings, "allow_no_login", True)
+    assert c.get("/systems").status_code == 200
+
+
+def test_failed_logins_are_limited(monkeypatch):
+    import base64
+    monkeypatch.setattr(settings, "web_user", "admin")
+    monkeypatch.setattr(settings, "web_password", "right")
+    monkeypatch.setattr(settings, "login_max_failures", 3)
+    c = _client()
+    bad = {"Authorization": "Basic " + base64.b64encode(b"admin:wrong").decode()}
+    good = {"Authorization": "Basic " + base64.b64encode(b"admin:right").decode()}
+    assert [c.get("/systems", headers=bad).status_code for _ in range(3)] == [401, 401, 401]
+    r = c.get("/systems", headers=good)  # even the right password waits now
+    assert r.status_code == 429 and int(r.headers["retry-after"]) > 200
+    assert c.get("/api/hosts", headers={"Authorization": "Bearer guess"}).status_code == 429
+    security.limiter.reset()
+    assert c.get("/systems", headers=good).status_code == 200
+    assert c.get("/systems").status_code == 401  # no credentials at all is not a failed guess
+    assert security.limiter.retry_after("testclient") == 0
+
+
+def test_oidc_signature_algorithms(monkeypatch):
+    import base64
+    import json
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+
+    from diysca.auth import oidc
+    b64 = lambda b: base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+    key = ec.generate_private_key(ec.SECP256R1())
+    nums = key.public_key().public_numbers()
+    jwk = {"kty": "EC", "crv": "P-256", "kid": "e1", "x": b64(nums.x.to_bytes(32, "big")),
+           "y": b64(nums.y.to_bytes(32, "big"))}
+    monkeypatch.setattr(oidc, "_jwks", lambda d, transport=None, refresh=False: [jwk])
+
+    def token(alg, sign):
+        signed = f"{b64(json.dumps({'alg': alg, 'kid': 'e1'}).encode())}.{b64(b'{}')}"
+        return f"{signed}.{b64(sign(signed.encode()))}"
+
+    def es256(data):
+        r, s = decode_dss_signature(key.sign(data, ec.ECDSA(hashes.SHA256())))
+        return r.to_bytes(32, "big") + s.to_bytes(32, "big")
+    oidc.verify_signature(token("ES256", es256), {})
+    with pytest.raises(oidc.OIDCError):
+        oidc.verify_signature(token("ES256", lambda d: b"\0" * 64), {})
+    import hashlib
+    import hmac
+    monkeypatch.setattr(settings, "oidc", {"issuer": "x", "client_id": "c", "client_secret": "s3cret"})
+    oidc.verify_signature(token("HS256", lambda d: hmac.new(b"s3cret", d, hashlib.sha256).digest()), {})
+    with pytest.raises(oidc.OIDCError):
+        oidc.verify_signature(token("HS256", lambda d: hmac.new(b"guess", d, hashlib.sha256).digest()), {})
+    with pytest.raises(oidc.OIDCError, match="not accepted"):
+        oidc.verify_signature(token("none", lambda d: b""), {})

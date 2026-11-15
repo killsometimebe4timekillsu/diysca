@@ -1,5 +1,7 @@
 # PostgreSQL for diysca (Podman Quadlet). Put the password in /etc/diysca/db.env:
 #   POSTGRES_PASSWORD=...   and   DIYSCA_DATABASE_URL=postgresql://diysca:...@diysca-db:5432/diysca
+# and the web login (diysca refuses to listen on the network without one):
+#   DIYSCA_WEB_USER=admin   and   DIYSCA_WEB_PASSWORD=...
 [Unit]
 Description=diysca PostgreSQL
 

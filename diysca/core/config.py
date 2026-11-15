@@ -70,6 +70,11 @@ class Settings:
     audit_days: int = 365  # keep the audit log this long
     web_user: str = ""  # set both to enable HTTP basic auth
     web_password: str = ""
+    # Without a login (web_user / web_password or OIDC) everyone who reaches the UI is an admin. diysca then only
+    # listens on 127.0.0.1 and refuses web pages while API tokens are set. true lifts both (lab setups only).
+    allow_no_login: bool = False
+    login_max_failures: int = 5          # failed logins per client address before it has to wait; 0 = no limit
+    login_lockout_seconds: float = 300   # first wait; doubles with each further failure, at most 1 h
     base_url: str = "http://localhost:8080"
 
     def __post_init__(self):
