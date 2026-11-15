@@ -155,7 +155,8 @@ async def mitigation_create(request: Request):
     form = await request.form()
     try:
         m = await asyncio.to_thread(mitigate.approve, _form_ids(form), actor(request), str(form.get("note") or ""),
-                                    str(form.get("handoff") or "") or None, bool(form.get("rescan", "1") == "1"))
+                                    str(form.get("handoff") or "") or None, bool(form.get("rescan", "1") == "1"),
+                                    str(form.get("filter") or "") or None)
     except mitigate.MitigationError as e:
         return RedirectResponse(f"/mitigations?{urlencode({'error': str(e)})}", 303)
     return RedirectResponse(f"/mitigations/{m['id']}", 303)
@@ -260,7 +261,8 @@ async def api_mitigation_create(request: Request):
         ids = _ids_from_filter(str(body["filter"]))
     try:
         return await asyncio.to_thread(mitigate.approve, ids, actor(request), str(body.get("note") or ""),
-                                       body.get("handoff") or None, bool(body.get("rescan", True)))
+                                       body.get("handoff") or None, bool(body.get("rescan", True)),
+                                       str(body.get("filter") or "") or None)
     except mitigate.MitigationError as e:
         raise HTTPException(422, str(e))
 

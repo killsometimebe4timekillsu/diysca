@@ -92,7 +92,9 @@ def _main(argv=None):
 
     s = sp.add_parser("playbook", help="generate an Ansible patch playbook")
     s.add_argument("--host", action="append", help="only these hosts (repeatable)")
-    s.add_argument("--filter", default="fix=repo", help="findings filter like the UI, e.g. 'fix=repo&severity=HIGH'")
+    s.add_argument("--filter", default="fix=repo",
+                   help="findings filter like the UI, e.g. 'fix=repo&severity=HIGH' (default: fix=repo, the findings "
+                        "with a fix in the system's repos; use --filter '' for all open findings)")
     s.add_argument("-o", "--output", help="write to file instead of stdout")
 
     s = sp.add_parser("repo-update", help="sync/publish/promote a self-hosted repo (aptly, pulp, foreman)")
@@ -265,6 +267,13 @@ def _main(argv=None):
         rows = db.q(sql, params)
         if a.host:
             rows = [r for r in rows if r["host_name"] in a.host]
+        if not rows:
+            marks = ",".join("?" * len(a.host or []))
+            n = db.q1("SELECT COUNT(*) n FROM findings f JOIN hosts h ON h.id=f.host_id WHERE f.status='open'" +
+                      (f" AND h.name IN ({marks})" if a.host else ""), a.host or [])["n"]
+            print(f"no open findings match the filter '{a.filter}'" + (f" on {', '.join(a.host)}" if a.host else "") +
+                  f" ({n} open findings in total" + ("; none has a fix in the repos" if "fix=repo" in a.filter else "") +
+                  ")", file=sys.stderr)
         text, summary = patch.build_playbook([r["id"] for r in rows])
         if summary["hosts"]:
             from diysca.mitigation import patchlog
@@ -354,7 +363,7 @@ def _mitigations(a):
             if not ids and a.filter:
                 from diysca.ui import _ids_from_filter
                 ids = _ids_from_filter(a.filter)
-            m = mitigate.approve(ids, a.by, a.note, a.handoff or None)
+            m = mitigate.approve(ids, a.by, a.note, a.handoff or None, filter=a.filter or None)
             print(f"mitigation #{m['id']} approved: {len(m['findings'])} findings on {', '.join(m['hosts'])}")
             print(m["links"]["ui"])
             return

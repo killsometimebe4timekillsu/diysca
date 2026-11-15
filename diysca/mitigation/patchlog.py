@@ -51,9 +51,17 @@ def record_mitigation(mid: int, status: str, actor: str):
     ids = [r["finding_id"] for r in db.q("SELECT finding_id FROM mitigation_findings WHERE mitigation_id=?", (mid,))]
     hosts, cves = hosts_and_cves(ids)
     tail = "\n".join((m["log"] or "").splitlines()[-15:])
-    return db.patch_run("mitigation", f"mitigation #{mid} {status}" + (f": {m['note']}" if m["note"] else ""),
+    try:
+        sm = json.loads(m["summary"] or "{}")
+    except ValueError:
+        sm = {}
+    # say what the run could do at all: a mitigation with manual items only is "done" without a package patched
+    what = f" ({sm.get('playbook_packages', 0)} packages, {sm.get('manual_items', 0)} manual items)" if sm else ""
+    # a cancelled mitigation that nobody claimed was not run by anyone: the canceller is the actor only
+    executor = m["claimed_by"] or ("" if status == "cancelled" else actor)
+    return db.patch_run("mitigation", f"mitigation #{mid} {status}{what}" + (f": {m['note']}" if m["note"] else ""),
                         actor=actor, approver=m["approved_by"], approved_at=m["created_at"],
-                        executor=m["claimed_by"] or actor, status=status, hosts=",".join(hosts), findings=len(ids),
+                        executor=executor, status=status, hosts=",".join(hosts), findings=len(ids),
                         cves=",".join(cves[:500]), mitigation_id=mid, started_at=m["claimed_at"], detail=tail[-4000:])
 
 

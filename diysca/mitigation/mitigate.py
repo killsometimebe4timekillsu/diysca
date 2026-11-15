@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 
 import httpx
 
@@ -118,17 +119,35 @@ def _in_scope(mid: int) -> bool:
 
 
 # ------------------------------------------------------------------ lifecycle
+_approve_lock = threading.Lock()  # two approvals at once must not both take the same findings
+
+
 def approve(finding_ids: list[int], approved_by: str, note: str = "", handoff: str | None = None,
-            rescan: bool = True) -> dict:
-    """Create a mitigation for the open findings among `finding_ids` and hand it off."""
+            rescan: bool = True, filter: str | None = None) -> dict:
+    """Create a mitigation for the open findings among `finding_ids` and hand it off. Findings that already are
+    in an open mitigation are left out. `filter` is the findings filter the ids came from, for the error text."""
+    with _approve_lock:
+        return _approve(finding_ids, approved_by, note, handoff, rescan, filter)
+
+
+def _approve(finding_ids, approved_by, note, handoff, rescan, filter) -> dict:
     ids = sorted({int(i) for i in finding_ids})
     if not ids:
-        raise MitigationError("select at least one finding")
+        raise MitigationError(f"no open findings match the filter '{filter}'" if filter
+                              else "select at least one finding")
     marks = ",".join("?" * len(ids))
     rows = db.q(f"""SELECT f.id, f.vuln_id, f.severity, f.kev, h.name host FROM findings f JOIN hosts h ON h.id=f.host_id
                     WHERE f.id IN ({marks}) AND f.status='open'{scope.clause("f.host_id")}""", ids)
     if not rows:
         raise MitigationError("none of the selected findings is open")
+    busy = {r["finding_id"]: r["id"] for r in db.q(
+        f"""SELECT mf.finding_id, m.id FROM mitigation_findings mf JOIN mitigations m ON m.id=mf.mitigation_id
+            WHERE mf.finding_id IN ({marks}) AND m.status IN ({",".join("?" * len(OPEN_STATUSES))})""",
+        ids + list(OPEN_STATUSES))}
+    rows = [r for r in rows if r["id"] not in busy]
+    if not rows:
+        raise MitigationError("the selected findings are already in open mitigation " +
+                              ", ".join(f"#{m}" for m in sorted(set(busy.values()))[:10]))
     if handoff and not db.q1("SELECT name FROM handoffs WHERE name=?", (handoff,)):
         raise MitigationError(f"unknown hand-off target '{handoff}'")
     ids = [r["id"] for r in rows]
