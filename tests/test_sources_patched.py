@@ -168,6 +168,13 @@ def test_patched_ranges():
     assert patched.query({"range": "30d", "group": "db"}, now)["stats"]["cves"] == 2
     c = patched.query({"range": "custom", "from": "2026-10-25", "to": "2026-10-25"}, now)
     assert [r["vuln_id"] for r in c["rows"]] == ["CVE-1"] and c["stats"]["median_days"] == 10.0
+    # "still open" follows the system filters, like every other number
+    db.x("INSERT INTO findings(host_id,package,version,vuln_id,severity,status,first_seen) VALUES "
+         "(1,'zlib','1','CVE-8','HIGH','open','x'),(2,'zlib','1','CVE-8','LOW','open','x'),(2,'xz','1','CVE-9','LOW','open','x')")
+    assert patched.query({"range": "30d"}, now)["stats"]["open_now"] == 3
+    assert patched.query({"range": "30d", "host": "a"}, now)["stats"]["open_now"] == 1
+    assert patched.query({"range": "30d", "group": "web"}, now)["stats"]["open_now"] == 2
+    assert patched.query({"range": "30d", "severity": "HIGH"}, now)["stats"]["open_now"] == 1
     assert "<svg" in d["chart"] and "bar HIGH" not in d["chart"] and "bar CRITICAL" in d["chart"]
 
 
