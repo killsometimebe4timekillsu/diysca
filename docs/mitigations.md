@@ -22,7 +22,8 @@ colleague.
 * **CLI:** `diysca mitigations approve --filter 'group=prod&fix=repo&severity=HIGH' --note CHG-1234 [--handoff gh-actions]`
 * **API:** `POST /api/mitigations` with `{"filter": "host=web1&fix=repo", "note": "CHG-1234"}` or `{"finding_ids": [1, 2]}`.
 
-Only **open** findings are taken. The playbook is created at approval time and stored with the mitigation, so it
+Only **open** findings are taken, and findings that already are in an open mitigation (approved, claimed or
+running) are left out, so the same finding is never handed out twice. The playbook is created at approval time and stored with the mitigation, so it
 doesn't change under the agent's feet. Language packages, container images and fixes that aren't in your repos yet
 are listed as comments at the top of the playbook, the same as on *Patching > Patch*.
 

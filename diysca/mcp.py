@@ -220,7 +220,8 @@ async def call(name: str, args: dict, ctx: Context):
             raise ValueError("no system matches")
         return await scanner.scan_all(host_ids=sel)
     if name == "approve_findings":
-        return mitigate.approve(_ids(a), ctx.actor, str(a.get("note") or ""), a.get("handoff") or None)
+        return mitigate.approve(_ids(a), ctx.actor, str(a.get("note") or ""), a.get("handoff") or None,
+                                filter=str(a.get("filter") or "") or None)
     if name == "cancel_mitigation":
         return mitigate.cancel(int(a["id"]), ctx.actor, str(a.get("reason") or ""))
     raise ValueError(f"unknown tool {name}")
