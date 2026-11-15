@@ -64,7 +64,7 @@ repo_fetch: scanner
 osv_mode: api                     # api = api.osv.dev | bulk = mirror per-distro zip locally (works offline/air-gapped)
 # osv_bulk_url: https://osv-vulnerabilities.storage.googleapis.com   # or file:///mirror (expects <Ecosystem>/all.zip)
 nvd_enabled: true
-nvd_api_key: ""                   # free key from nvd.nist.gov makes enrichment ~10x faster
+nvd_api_key: ""                   # free key makes enrichment ~10x faster, see docs/nvd-api-key.md
 # NVD lookups run after scans in the background (CLI: before it returns), time-boxed per run:
 # nvd_budget_seconds: 0           # 0 = 90 s without a key, 600 s with one; the next run continues
 kev_enabled: true

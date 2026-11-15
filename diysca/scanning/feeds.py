@@ -335,7 +335,7 @@ async def nvd_enrich(limit: int = 200, host_ids: list[int] | None = None, budget
     left = len(nvd_pending(limit=100000))
     if stop or left:
         db.event("feed", f"NVD: {n} CVEs enriched, {left} still pending" + (f", stopped: {stop}" if stop else "")
-                 + ("" if settings.nvd_api_key or not left else "; an NVD API key (nvd_api_key) makes this ~10x faster"))
+                 + ("" if settings.nvd_api_key or not left else "; an NVD API key (nvd_api_key) makes this ~10x faster, see docs/nvd-api-key.md"))
     return n
 
 
