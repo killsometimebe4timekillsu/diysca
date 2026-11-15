@@ -1,6 +1,17 @@
 """Human-readable lines about a finding: used by the finding page, alerts and the CLI."""
 from __future__ import annotations
 
+# Tool that upgrades a language package, by OSV ecosystem.
+UPGRADE_TOOL = {"PyPI": "pip", "npm": "npm", "Packagist": "composer", "Maven": "Maven/Gradle", "Go": "go get",
+                "crates.io": "cargo", "RubyGems": "bundler", "NuGet": "NuGet", "Pub": "pub", "Hex": "mix"}
+
+
+def upgrade_hint(f) -> str:
+    """How the fix gets onto the system: from the distro repos, or through the language's package manager."""
+    if f["ecosystem"] and f["ecosystem"] != "Apache":
+        return f"upgrade via {UPGRADE_TOOL.get(f['ecosystem'], f['ecosystem'])} to >= {f['fixed_version']}"
+    return "fix available in your repos" if f["fix_in_repo"] else "fix NOT yet in your repos"
+
 
 def format_finding(f, host) -> str:
     sev = f["severity"] or "UNKNOWN"
@@ -10,7 +21,7 @@ def format_finding(f, host) -> str:
         line += " [KNOWN EXPLOITED]"
     if f["fixed_version"]:
         line += f", fixed in {f['fixed_version']}"
-        line += " - fix available in your repos" if f["fix_in_repo"] else " - fix NOT yet in your repos"
+        line += " - " + upgrade_hint(f)
     else:
         line += ", no fix released yet"
     return line
