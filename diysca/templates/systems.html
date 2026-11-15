@@ -36,7 +36,7 @@
 </table></div>
 <div class="row">
 <div class="card"><h2>Import Ansible inventory</h2>
-<p class="muted">Configured: {{ inventories|join(', ') or 'none' }}. Configured inventories are re-read before every scan.</p>
+<p class="muted">Configured: {{ inventories|join(', ') or 'none' }}. Configured inventories are re-read before every scan. Other paths must be below a directory listed in <span class="mono">inventory_dirs</span> in config.yml.</p>
 <form method="post" action="/inventory/import" class="filters">
   <label>Inventory path (file or directory, on the scanner)<input name="path" size="40" placeholder="/inventories/production/hosts.yml"></label>
   <button>Import</button></form></div>

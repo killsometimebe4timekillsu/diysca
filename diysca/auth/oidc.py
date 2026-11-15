@@ -26,6 +26,7 @@ from urllib.parse import urlencode
 import httpx
 
 from diysca.core.config import settings
+from diysca.core.security import safe_next
 
 _discovery: dict = {}
 
@@ -82,7 +83,7 @@ def start(next_url: str = "/", transport=None) -> tuple[str, dict]:
               "scope": " ".join(scopes) if isinstance(scopes, list) else str(scopes), "state": state, "nonce": nonce,
               "code_challenge": challenge, "code_challenge_method": "S256"}
     return d["authorization_endpoint"] + "?" + urlencode(params), \
-        {"state": state, "nonce": nonce, "verifier": verifier, "next": next_url if next_url.startswith("/") else "/"}
+        {"state": state, "nonce": nonce, "verifier": verifier, "next": safe_next(next_url)}
 
 
 def _claims_from_jwt(token: str) -> dict:

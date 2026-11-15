@@ -12,14 +12,17 @@ SSH using curl/wget (`repo_fetch: host`).
 """
 from __future__ import annotations
 
+import asyncio
 import bz2
-import gzip
 import io
+import ipaddress
 import lzma
 import re
 import shlex
+import socket
 import tarfile
 import time
+import zlib
 import xml.etree.ElementTree as ET
 
 import httpx
@@ -36,13 +39,34 @@ class FetchError(Exception):
     pass
 
 
+MAX_DOWNLOAD = 400 * 1024 * 1024      # compressed index, as downloaded
+MAX_INDEX = 2 * 1024 * 1024 * 1024    # after decompression
+
+
+def _bounded(decompressor, data: bytes) -> bytes:
+    out = decompressor.decompress(data, MAX_INDEX)
+    if not decompressor.eof and len(out) >= MAX_INDEX:
+        raise FetchError("index is larger than 2 GB after decompression")
+    return out
+
+
 def _decompress(url: str, data: bytes) -> bytes:
+    """Repo URLs come from the scanned systems, so a hostile one can serve a decompression bomb: stop at 2 GB."""
     if url.endswith(".gz"):
-        return gzip.decompress(data)
+        out = b""
+        while data:  # gzip files may have several members
+            d = zlib.decompressobj(wbits=31)
+            out += d.decompress(data, MAX_INDEX - len(out))
+            if not d.eof:
+                if len(out) >= MAX_INDEX:
+                    raise FetchError("index is larger than 2 GB after decompression")
+                break
+            data = d.unused_data
+        return out
     if url.endswith(".xz"):
-        return lzma.decompress(data)
+        return _bounded(lzma.LZMADecompressor(), data)
     if url.endswith(".bz2"):
-        return bz2.decompress(data)
+        return _bounded(bz2.BZ2Decompressor(), data)
     if url.endswith(".zst"):
         try:
             import zstandard
@@ -52,29 +76,62 @@ def _decompress(url: str, data: bytes) -> bytes:
     return data
 
 
+def _forbidden_address(host: str) -> str | None:
+    """Why the scanner must not fetch from `host`, or None. Loopback and link-local addresses are never a
+    package mirror for the scanner; they are the scanner itself and the cloud metadata service."""
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except OSError:
+        return None  # let the HTTP client report the DNS error
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0].split("%")[0])
+        if ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+            return f"{host} resolves to {ip} (loopback / link-local)"
+    return None
+
+
+async def _guard_request(request: httpx.Request):
+    """Runs for every request, redirects included. The URLs are whatever the scanned system's repo files say."""
+    if request.url.scheme not in ("http", "https"):
+        raise FetchError(f"unsupported URL scheme {request.url.scheme}")
+    why = await asyncio.to_thread(_forbidden_address, request.url.host)
+    if why:
+        raise FetchError(f"refusing to fetch {request.url}: {why}. Use repo_fetch: host for repos only the system "
+                         "itself can reach.")
+
+
 class Fetcher:
     def __init__(self, transport=None):
         self.transport = transport if settings.repo_fetch == "host" else None
-        self.client = httpx.AsyncClient(timeout=settings.http_timeout, follow_redirects=True,
-                                        verify=settings.http_proxy_ca or True)
+        self.client = httpx.AsyncClient(timeout=settings.http_timeout, follow_redirects=True, max_redirects=5,
+                                        verify=settings.http_proxy_ca or True,
+                                        event_hooks={"request": [_guard_request]})
 
     async def get(self, url: str) -> bytes:
         if url.startswith("file://") and self.transport is None:
             raise FetchError("file:// repos can only be read with repo_fetch: host")
         if self.transport is not None:
             if url.startswith("file://"):
-                cmd = f"cat {shlex.quote(url[7:])}"
+                cmd = f"cat -- {shlex.quote(url[7:])}"
+            elif not url.startswith(("http://", "https://", "ftp://")):
+                raise FetchError(f"unsupported repo URL {url[:80]}")  # also keeps "-o file" style values from curl
             else:
                 u = shlex.quote(url)
-                cmd = f"curl -fsSL {u} 2>/dev/null || wget -qO- {u}"
+                cmd = f"curl -fsSL -- {u} 2>/dev/null || wget -qO- -- {u}"
             data = await self.transport.run(cmd, binary=True)
             if not data:
                 raise FetchError(f"empty response for {url}")
             return data
-        r = await self.client.get(url)
-        if r.status_code != 200:
-            raise FetchError(f"HTTP {r.status_code} for {url}")
-        return r.content
+        async with self.client.stream("GET", url) as r:
+            if r.status_code != 200:
+                raise FetchError(f"HTTP {r.status_code} for {url}")
+            chunks, size = [], 0
+            async for chunk in r.aiter_bytes():
+                size += len(chunk)
+                if size > MAX_DOWNLOAD:
+                    raise FetchError(f"{url} is larger than {MAX_DOWNLOAD // 1024 // 1024} MB")
+                chunks.append(chunk)
+            return b"".join(chunks)
 
     async def get_first(self, urls: list[str]) -> tuple[str, bytes]:
         errors = []
@@ -137,7 +194,7 @@ def parse_apkindex_tar(data: bytes) -> dict[str, tuple[str, str]]:
         member = next((m for m in tf.getmembers() if m.name == "APKINDEX"), None)
         if member is None:
             raise FetchError("APKINDEX missing in archive")
-        text = tf.extractfile(member).read().decode(errors="replace")
+        text = tf.extractfile(member).read(MAX_INDEX).decode(errors="replace")
     out = {}
     for p in parse_apk_db(text):
         if p.name not in out or compare("apk", p.version, out[p.name][0]) > 0:

@@ -26,15 +26,19 @@ PRUNE = ["proc", "sys", "dev", "run", ".git", ".cache", ".npm", ".cargo/registry
 
 
 def lang_script(paths: list[str], max_lock_bytes: int = 4_000_000, max_entries: int = 50000) -> str:
-    """One /bin/sh script that prints everything we need, tagged per line."""
+    """One /bin/sh script that prints everything we need, tagged per line.
+
+    File names and file contents on the scanned system are written by its users, so the script never puts
+    them into a program (sed, awk, sh -c) or an unquoted expansion, and it uses no temporary files: the
+    scan often runs with more rights than the users who can write below the scan paths."""
     p = " ".join(shlex.quote(x) for x in paths)
     prune = " -o ".join(f"-path '*/{d}'" for d in PRUNE)
     locks = " -o ".join(f"-name '{n}'" for n in LOCK_NAMES)
     return f"""
-for r in {p}; do [ -d "$r" ] && echo "$r"; done > /tmp/.diysca_roots.$$
-ROOTS=$(cat /tmp/.diysca_roots.$$); rm -f /tmp/.diysca_roots.$$
-[ -z "$ROOTS" ] && exit 0
-find $ROOTS -xdev \\( {prune} \\) -prune -o \\( \\
+set --
+for r in {p}; do [ -d "$r" ] && set -- "$@" "$r"; done
+[ $# -eq 0 ] && exit 0
+find "$@" -xdev \\( {prune} \\) -prune -o \\( \\
     \\( -type d \\( -name '*.dist-info' -o -name '*.egg-info' \\) -print \\) -o \\
     \\( -type f -name '*.gemspec' -path '*/specifications/*' -print \\) -o \\
     \\( -type f -name package.json -path '*/node_modules/*' -print \\) -o \\
@@ -51,7 +55,7 @@ find $ROOTS -xdev \\( {prune} \\) -prune -o \\( \\
       [ -n "$n" ] && [ -n "$v" ] && printf 'N\\t%s\\t%s\\t%s\\n' "$f" "$n" "$v" ;;
     *.jar)
       if command -v unzip >/dev/null 2>&1; then
-        unzip -p "$f" 'META-INF/maven/*/pom.properties' 2>/dev/null | tr -d '\\r' | grep -E '^(groupId|artifactId|version)=' | sed "s|^|P\\t$f\\t|"
+        unzip -p "$f" 'META-INF/maven/*/pom.properties' 2>/dev/null | tr -d '\\r' | grep -E '^(groupId|artifactId|version)=' | while IFS= read -r l; do printf 'P\\t%s\\t%s\\n' "$f" "$l"; done
       fi
       printf 'J\\t%s\\n' "$f" ;;
     *) printf '{MARK} %s\\n' "$f"; head -c {max_lock_bytes} "$f" 2>/dev/null; printf '\\n{MARK}END\\n' ;;

@@ -158,12 +158,12 @@ def test_libvirt_and_filters():
         if args[2] == "list":
             return out["list"]
         if args[2] == "domifaddr":
-            if args[3] == "vm1" and args[5] == "lease":
+            if args[4] == "vm1" and args[6] == "lease":
                 return " vnet0  52:54:00:aa  ipv4  192.168.122.10/24\n"
-            if args[3] == "vm2" and args[5] == "agent":
+            if args[4] == "vm2" and args[6] == "agent":
                 return " eth0  52:54:00:bb  ipv4  192.168.122.11/24\n"
             return ""
-        return out.get(f"dumpxml {args[3]}", out["dumpxml"])
+        return out.get(f"dumpxml {args[4]}", out["dumpxml"])
     hs = {h.name: h for h in libvirt.discover({"type": "libvirt", "uri": "qemu+ssh://root@kvm1/system",
                                                "hypervisor": True}, run=run)}
     assert hs["vm1"].address == "192.168.122.10" and hs["vm2"].address == "192.168.122.11"

@@ -281,7 +281,7 @@ class _PgConn:
 
 def _connect_sqlite():
     if settings.database != ":memory:":
-        Path(settings.database).parent.mkdir(parents=True, exist_ok=True)
+        Path(settings.database).parent.mkdir(parents=True, exist_ok=True, mode=0o700)  # holds tokens and channel URLs
     c = sqlite3.connect(settings.database, check_same_thread=False, isolation_level=None)
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA foreign_keys=ON")

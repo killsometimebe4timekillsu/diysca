@@ -19,8 +19,9 @@ from collections import defaultdict
 import yaml
 
 from diysca import __version__
-from diysca.core import db
+from diysca.core import db, scope
 from diysca.core.versions import max_version
+from diysca.mitigation import pbsafe
 
 
 def _pin(pkg_type: str, name: str, version: str) -> str:
@@ -29,15 +30,10 @@ def _pin(pkg_type: str, name: str, version: str) -> str:
     return f"{name}={version}"      # apt, apk, zypper
 
 
-class _Dumper(yaml.SafeDumper):
-    pass
+_Dumper = pbsafe.Dumper
 
 
-def _str_repr(dumper, data):
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data, style='"' if "=" in data or ":" in data else None)
-
-
-_Dumper.add_representer(str, _str_repr)
+_ODD = "Skipped: unexpected characters in the package name or version (check the system, it may be tampered with)"
 
 
 def _tasks_for(pkg_type: str, os_id: str, pins: list[str]) -> list[dict]:
@@ -79,7 +75,8 @@ def build_playbook(finding_ids: list[int]) -> tuple[str, dict]:
     marks = ",".join("?" * len(finding_ids))
     rows = db.q(f"""SELECT f.*, h.name host_name, h.kind host_kind, h.pkg_type, h.os_id, h.image, h.parent_id
                     FROM findings f JOIN hosts h ON h.id=f.host_id
-                    WHERE f.id IN ({marks}) AND f.status='open' ORDER BY h.name, f.package""", finding_ids)
+                    WHERE f.id IN ({marks}) AND f.status='open'{scope.clause("f.host_id")}
+                    ORDER BY h.name, f.package""", finding_ids)
     per_host: dict[str, dict] = {}
     manual: dict[str, list[str]] = defaultdict(list)
     # One line per language package and location, with the version that fixes all of its selected CVEs.
@@ -128,6 +125,9 @@ def build_playbook(finding_ids: list[int]) -> tuple[str, dict]:
             p = db.q1("SELECT version, repo_version FROM packages WHERE host_id=? AND name=? AND ecosystem=''",
                       (h["host_id"], b))
             if p and p["repo_version"] and p["repo_version"] != p["version"]:
+                if not pbsafe.pin_ok(h["pkg_type"], b, p["repo_version"]):
+                    manual[_ODD].append(f"{host}: {b} -> {p['repo_version']}")
+                    continue
                 pins.append(_pin(h["pkg_type"], b, p["repo_version"]))
         if not pins:
             continue
@@ -149,7 +149,7 @@ def build_playbook(finding_ids: list[int]) -> tuple[str, dict]:
             "# Packages are pinned to the exact version your repos offered at scan time.", "#"]
     for title, items in manual.items():
         head.append(f"# {title}:")
-        head += [f"#   - {i}" for i in items[:200]]
+        head += [f"#   - {pbsafe.comment(i)}" for i in items[:200]]
         if len(items) > 200:
             head.append(f"#   ... and {len(items) - 200} more")
         head.append("#")

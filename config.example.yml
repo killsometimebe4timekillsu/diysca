@@ -11,6 +11,7 @@ database_url: postgresql://diysca:change-me@localhost:5432/diysca
 inventories: []
 #  - /etc/ansible/hosts              # native package / AppImage / Flatpak
 #  - /inventories/hosts.ini          # OCI image (mount your inventories at /inventories)
+# inventory_dirs: [/inventories]   # the web UI may import more inventories from these directories (default: none)
 use_ansible_inventory_cli: true   # use `ansible-inventory --list` if installed (dynamic inventories, vault)
 
 # Inventory providers: systems straight from hypervisors, clouds and clusters (docs/inventory-providers.md).

@@ -96,7 +96,7 @@ def login_user(info: dict) -> User | None:
 
 def user_from_cookie(request: Request) -> User | None:
     d = session.verify(request.cookies.get(session.COOKIE))
-    if not d:
+    if not d or d.get("t") != "login" or not d.get("u") or d.get("r") not in ROLES:
         return None
     return User(name=d["u"], role=d["r"], kind="oidc", hosts=d.get("h") or [], email=d.get("e", ""),
                 groups=d.get("g") or [])

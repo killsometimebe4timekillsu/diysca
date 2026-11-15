@@ -7,13 +7,14 @@ from urllib.parse import urlencode
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
 
-from diysca.core import db
+from diysca.core import db, scope
 from diysca.core.config import settings
 from diysca.mitigation import mitigate, patch, patched, patchlog, repomgr
 from diysca.scanning import scanner
 from diysca.scanning.feeds import SEVERITY_ORDER
 from diysca.ui import (
     check_host,
+    download_name,
     _bg_run,
     _ids_from_filter,
     _masked,
@@ -57,7 +58,7 @@ def reprovision_host(request: Request, host_id: int, mode: str = "fixed", target
     db.patch_run("reprovision", f"rebuild playbook for {h['name']} ({mode}): {summary.get('packages', 0)} packages",
                  actor=actor(request), status="generated", hosts=h["name"])
     return Response(text, media_type="application/x-yaml",
-                    headers={"Content-Disposition": f'attachment; filename="reprovision-{h["name"]}.yml"'})
+                    headers={"Content-Disposition": f'attachment; filename="reprovision-{download_name(h["name"])}.yml"'})
 
 
 @router.post("/reprovision")
@@ -74,7 +75,7 @@ async def reprovision_upload(request: Request, file: UploadFile = File(...), mod
         ctx["reprovision_error"] = f"{file.filename}: {e}"
         return render(request, "patching.html", **ctx)
     return Response(text, media_type="application/x-yaml",
-                    headers={"Content-Disposition": f'attachment; filename="reprovision-{summary["system"]}.yml"'})
+                    headers={"Content-Disposition": f'attachment; filename="reprovision-{download_name(summary["system"])}.yml"'})
 
 
 def _patching_ctx() -> dict:
@@ -83,6 +84,7 @@ def _patching_ctx() -> dict:
                       SUM(CASE WHEN f.fix_in_repo=0 AND f.fixed_version IS NOT NULL AND f.ecosystem='' THEN 1 ELSE 0 END) AS repo_behind,
                       SUM(CASE WHEN f.ecosystem!='' THEN 1 ELSE 0 END) AS lang
                     FROM hosts h JOIN findings f ON f.host_id=h.id AND f.status='open'
+                    WHERE 1=1""" + scope.clause("h.id") + """
                     GROUP BY h.id, h.name, h.os_pretty, h.kind ORDER BY fixable DESC, h.name""")
     mgrs = []
     for m in repomgr.managers():
@@ -104,6 +106,7 @@ async def patch_playbook(request: Request):
     if not ids and form.get("filter") is not None:
         ids = _ids_from_filter(str(form.get("filter")))
     if form.get("host_id"):
+        check_host(int(form.get("host_id")))
         ids = [r["id"] for r in db.q("SELECT id FROM findings WHERE host_id=? AND status='open'",
                                      (int(form.get("host_id")),))]
     text, summary = patch.build_playbook(ids)
@@ -193,6 +196,8 @@ async def mitigation_report_ui(request: Request, mid: int, status: str = Form(..
 
 @router.post("/mitigations/{mid}/handoff")
 async def mitigation_handoff_ui(mid: int, target: str = Form(...)):
+    if not mitigate._in_scope(mid):
+        raise HTTPException(404)
     ok, res = await asyncio.to_thread(mitigate.deliver, mid, target)
     return RedirectResponse(f"/mitigations/{mid}?{urlencode({'msg': ('Sent: ' if ok else 'Failed: ') + res})}", 303)
 
@@ -274,7 +279,7 @@ def api_mitigation_playbook(mid: int):
     """The Ansible playbook created at approval time, pinned to the versions your repos offered then.
     Items a playbook can't fix (language packages, images, fixes not yet in your repos) are comments at the top."""
     m = db.q1("SELECT playbook FROM mitigations WHERE id=?", (mid,))
-    if not m:
+    if not m or not mitigate._in_scope(mid):
         raise HTTPException(404)
     return Response(m["playbook"] or "", media_type="application/x-yaml",
                     headers={"Content-Disposition": f'attachment; filename="diysca-mitigation-{mid}.yml"'})
