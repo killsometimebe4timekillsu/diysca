@@ -31,7 +31,22 @@ from fastapi.security import HTTPBasicCredentials
 from diysca.auth import oidc, session
 from diysca.core import db, events, scope
 from diysca.core.config import settings
-from diysca.core.security import ROLES, User, _basic, basic_ok, machine_path, set_user, token_entry, token_user
+from diysca.core.security import (
+    ROLES,
+    TOKENS_WITHOUT_LOGIN,
+    User,
+    _basic,
+    basic_ok,
+    check_not_locked,
+    client_ip,
+    limiter,
+    login_failed,
+    machine_path,
+    set_user,
+    token_entry,
+    token_user,
+    tokens_need_web_login,
+)
 
 OPEN_PATHS = ("/healthz", "/login", "/auth/callback", "/logout")
 
@@ -119,21 +134,30 @@ async def authenticate(request: Request, creds: HTTPBasicCredentials | None = De
         return
     user: User | None = None
     authz = request.headers.get("authorization", "")
+    if authz.lower().startswith("bearer ") or creds is not None:
+        check_not_locked(request)
     if authz.lower().startswith("bearer "):
         hit = token_entry(authz[7:].strip())
-        if not hit or not machine_path(path):
-            raise HTTPException(401, "invalid API token" if not hit else "API tokens only work on /api/* and /mcp",
-                                headers={"WWW-Authenticate": "Bearer"})
+        if not hit:
+            raise login_failed(request, "invalid API token", {"WWW-Authenticate": "Bearer"})
+        if not machine_path(path):
+            raise HTTPException(401, "API tokens only work on /api/* and /mcp", headers={"WWW-Authenticate": "Bearer"})
+        limiter.ok(client_ip(request))
         user = token_user(*hit)
     elif basic_ok(creds):
+        limiter.ok(client_ip(request))
         user = User(name=creds.username, kind="basic")
     else:
+        if creds is not None and settings.web_user and settings.web_password:
+            raise login_failed(request, "wrong user name or password", {"WWW-Authenticate": "Basic"})
         user = user_from_cookie(request)
     if user is None:
         login_needed = oidc.configured() or (settings.web_user and settings.web_password) or \
             (settings.api_tokens and machine_path(path))
         if not login_needed:
-            user = User(name="web")  # nothing configured: open, like without the auth module
+            if tokens_need_web_login(path):
+                raise HTTPException(403, TOKENS_WITHOUT_LOGIN)
+            user = User(name="web")  # nothing configured: open (127.0.0.1 only unless allow_no_login)
         elif oidc.configured() and _wants_html(request):
             nxt = request.url.path + ("?" + request.url.query if request.url.query else "")
             raise LoginRedirect("/login?" + urlencode({"next": nxt}))

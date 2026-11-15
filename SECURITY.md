@@ -43,6 +43,9 @@ an admin account to exploit, unless they let that admin break out of what diysca
 * **Repo indexes** are only fetched over http(s), never from loopback or link-local addresses (cloud metadata),
   and with size limits.
 * **Browsers:** changes sent from another website are refused (CSRF), and redirects only go to diysca's own pages.
-* **No login configured means everyone on the network is an admin.** diysca warns about it at startup and on
-  every page. Set `web_user` / `web_password` or OIDC before you expose it.
+* **No login configured means everyone who reaches the UI is an admin.** So diysca only listens on `127.0.0.1`
+  without a login, and closes the web UI when API tokens are set but people have no login. `allow_no_login: true`
+  lifts that for labs, with a warning on every page.
+* **Logins:** OIDC ID token signatures are checked against the provider's keys. Failed logins are limited per
+  client address.
 * **The web UI reads inventories only from configured paths** (`inventories`, `inventory_dirs`).

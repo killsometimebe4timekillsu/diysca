@@ -17,9 +17,27 @@ from .test_settings_reprovision import _scan
 ISS = "https://sso.example.org/realms/acme"
 
 
-def _jwt(claims):
-    enc = lambda d: base64.urlsafe_b64encode(json.dumps(d).encode()).rstrip(b"=").decode()
-    return f"{enc({'alg': 'RS256'})}.{enc(claims)}.sig"
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
+
+def _b64(b: bytes) -> str:
+    return base64.urlsafe_b64encode(b).rstrip(b"=").decode()
+
+
+def _jwks():
+    n = KEY.public_key().public_numbers()
+    return {"keys": [{"kty": "RSA", "kid": "k1", "use": "sig", "alg": "RS256",
+                      "n": _b64(n.n.to_bytes(256, "big")), "e": _b64(n.e.to_bytes(3, "big"))}]}
+
+
+def _jwt(claims, key=None, alg="RS256", kid="k1"):
+    enc = lambda d: _b64(json.dumps(d).encode())
+    signed = f"{enc({'alg': alg, 'kid': kid})}.{enc(claims)}"
+    sig = (key or KEY).sign(signed.encode(), padding.PKCS1v15(), hashes.SHA256()) if alg == "RS256" else b""
+    return f"{signed}.{_b64(sig)}"
 
 
 def _provider(monkeypatch, claims):
@@ -28,17 +46,22 @@ def _provider(monkeypatch, claims):
     def handler(req: httpx.Request):
         if req.url.path.endswith("/.well-known/openid-configuration"):
             return httpx.Response(200, json={"issuer": ISS, "authorization_endpoint": ISS + "/auth",
-                                             "token_endpoint": ISS + "/token", "end_session_endpoint": ISS + "/logout"})
+                                             "token_endpoint": ISS + "/token", "end_session_endpoint": ISS + "/logout",
+                                             "jwks_uri": ISS + "/certs"})
+        if req.url.path.endswith("/certs"):
+            return httpx.Response(200, json=_jwks())
         if req.url.path.endswith("/token"):
             form = parse_qs(req.content.decode())
             assert form["code"] == ["c0de"] and form["code_verifier"]
             return httpx.Response(200, json={"id_token": _jwt({"iss": ISS, "aud": "diysca", "exp": time.time() + 300,
-                                                               "nonce": state["nonce"], **claims}),
+                                                               "nonce": state["nonce"], **claims},
+                                                              **state.get("sign", {})),
                                              "access_token": "at"})
         return httpx.Response(404)
     t = httpx.MockTransport(handler)
     monkeypatch.setattr(oidc, "_client", lambda: httpx.Client(transport=t))
     oidc._discovery.clear()
+    oidc._jwks_cache.clear()
     monkeypatch.setattr(settings, "oidc", {"issuer": ISS, "client_id": "diysca", "client_secret": "s",
                                            "groups_claim": "groups"})
     monkeypatch.setattr(settings, "rbac", {"default_role": "", "bindings": [
@@ -87,6 +110,17 @@ def test_oidc_denied_and_bad_nonce(monkeypatch):
     assert "nonce" in r.headers["location"]
     r = c.get("/auth/callback", params={"code": "c0de", "state": "forged"}, follow_redirects=False)
     assert "state" in r.headers["location"]
+
+
+def test_oidc_rejects_forged_tokens(monkeypatch):
+    from diysca.web import app
+    other = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    for sign, why in (({"key": other}, "bad signature"), ({"alg": "none"}, "not accepted"),
+                      ({"kid": "unknown"}, "no provider key")):
+        state = _provider(monkeypatch, {"preferred_username": "mallory", "groups": ["secops"]})
+        state["sign"] = sign
+        r = _login(TestClient(app), state)
+        assert "/login?error=" in r.headers["location"] and why.replace(" ", "+") in r.headers["location"], sign
 
 
 def test_role_for_and_policy(monkeypatch):

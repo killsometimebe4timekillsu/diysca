@@ -22,6 +22,9 @@ services:
       db: { condition: service_healthy }
     environment:
       DIYSCA_DATABASE_URL: postgresql://diysca:${DIYSCA_DB_PASSWORD:-change-me}@db:5432/diysca
+      # The UI login. diysca refuses to listen on the network without one (or use OIDC, see docs/auth.md).
+      DIYSCA_WEB_USER: ${DIYSCA_WEB_USER:-admin}
+      DIYSCA_WEB_PASSWORD: ${DIYSCA_WEB_PASSWORD:?set DIYSCA_WEB_PASSWORD, the password of the web login}
     ports: ["8080:8080"]
     volumes:
       - data:/data                        # OSV bulk mirror cache

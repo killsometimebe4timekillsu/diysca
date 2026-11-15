@@ -126,13 +126,15 @@ jobs:
           podman run -d --name pg --network host -e POSTGRES_USER=diysca -e POSTGRES_PASSWORD=diysca docker.io/library/postgres:17
           for i in $(seq 1 30); do podman exec pg pg_isready -U diysca && break; sleep 1; done
           podman run -d --name diysca --network host \
+            -e DIYSCA_WEB_USER=admin -e DIYSCA_WEB_PASSWORD=ci-smoke-test \
             -e DIYSCA_DATABASE_URL=postgresql://diysca:diysca@127.0.0.1:5432/diysca diysca:ci
           ok=
           for i in $(seq 1 60); do curl -fsS http://127.0.0.1:8080/healthz && { ok=1; break; }; sleep 1; done
           podman ps -a
           podman logs diysca
           test -n "$ok"
-          curl -fsS http://127.0.0.1:8080/findings >/dev/null
+          curl -fsS -u admin:ci-smoke-test http://127.0.0.1:8080/findings >/dev/null
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/findings)" = 401
           podman exec diysca diysca --version
           podman exec pg psql -U diysca -c '\dt' | grep findings
           podman rm -f diysca pg

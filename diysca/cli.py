@@ -150,12 +150,15 @@ def _main(argv=None):
     if a.cmd == "serve":
         import uvicorn
 
-        from diysca.core.security import ui_open
+        from diysca.core.security import LOOPBACK, open_listen_error, ui_open
         from diysca.web import app
-        if ui_open() and a.host not in ("127.0.0.1", "::1", "localhost"):
-            logging.warning("No login configured (web_user/web_password or OIDC) and listening on %s:%s: anyone who "
-                            "can reach this port has admin access. Configure a login or use --host 127.0.0.1.",
-                            a.host, a.port)
+        err = open_listen_error(a.host)
+        if err:
+            logging.error(err)
+            sys.exit(2)
+        if ui_open() and a.host not in LOOPBACK:
+            logging.warning("allow_no_login is set and no login is configured: everyone who can reach %s:%s is an "
+                            "admin.", a.host, a.port)
         uvicorn.run(app, host=a.host, port=a.port, proxy_headers=True)
     elif a.cmd == "desktop":
         import threading

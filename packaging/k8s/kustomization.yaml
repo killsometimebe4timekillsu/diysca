@@ -20,6 +20,9 @@ secretGenerator:
     files:
       - password=secrets/db-password
       - url=secrets/database-url     # postgresql://diysca:<password>@diysca-db:5432/diysca
+  - name: diysca-web
+    files:
+      - password=secrets/web-password
   - name: diysca-ssh
     files:
       - id_ed25519=secrets/id_ed25519

@@ -71,10 +71,13 @@ The package installs to `/opt/diysca` and adds `/usr/bin/diysca`, a `diysca` sys
 ```bash
 # Podman (rootless works):
 podman run -d --name diysca -p 8080:8080 \
+  -e DIYSCA_WEB_USER=admin -e DIYSCA_WEB_PASSWORD='choose-one' \
   -v diysca-data:/data -v ./config.yml:/config/config.yml:ro \
   -v ./inventories:/inventories:ro -v ./keys:/keys:ro \
   ghcr.io/killsometimebe4timekillsu/diysca:latest
 ```
+
+diysca only listens beyond `127.0.0.1` when a login is configured: `web_user` / `web_password` as above, or OIDC ([docs/auth.md](docs/auth.md)). Without one it stops with a message that says so. For a lab without a login, set `DIYSCA_ALLOW_NO_LOGIN=true`.
 
 * **systemd-managed Podman:** use the Quadlet in [`packaging/quadlet/diysca.container`](packaging/quadlet/diysca.container).
 * **Compose-spec tools** (`podman compose`, `nerdctl compose`, …): use [`compose.yaml`](compose.yaml).

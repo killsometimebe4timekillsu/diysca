@@ -24,13 +24,28 @@ oidc:
 
 At the provider, register a confidential client with the redirect URI `<base_url>/auth/callback` and the
 post-logout URI `<base_url>/login`. diysca uses the authorization code flow with PKCE. It checks the ID
-token's issuer, audience, expiry and nonce; the token comes straight from the provider's token endpoint over
-TLS, so (as the OIDC spec allows) its signature is not checked. If the ID token has no groups, the userinfo
-endpoint is asked.
+token's signature against the provider's published keys (`jwks_uri`; RS256/384/512, PS256/384/512,
+ES256/384/512, or HS256/384/512 with the client secret), and its issuer, audience, expiry and nonce. Tokens with
+`alg: none` are refused. If the ID token has no groups, the userinfo endpoint is asked.
 
 Sessions are signed cookies (HttpOnly, SameSite=Lax, Secure when `base_url` is https), valid for
 `session_hours` (default 8). The signing key is `session_secret`, or a random key in `<data_dir>/session.key`.
 A role change takes effect at the next login.
+
+## No login, failed logins
+
+* **No login configured.** Without `web_user` / `web_password` and without OIDC, everyone who reaches the UI is
+  an admin. diysca therefore only listens on `127.0.0.1` in that state; `diysca serve --host 0.0.0.0` stops
+  with an error. The native package listens on `127.0.0.1` by default, so it starts as before.
+* **API tokens need a web login too.** With `api_tokens` set and no login for people, the web pages answer
+  `403`, because the open UI would let anyone do what the tokens' roles forbid. `/api/*` and `/mcp` keep working
+  with the tokens.
+* **Labs.** `allow_no_login: true` (env `DIYSCA_ALLOW_NO_LOGIN=true`) lifts both rules. Every page then shows a
+  red warning.
+* **Failed logins.** After `login_max_failures` (5) wrong passwords or tokens from one address, that address
+  waits `login_lockout_seconds` (300), doubling with each further failure up to one hour. The answer is `429`
+  with `Retry-After`. Behind a reverse proxy on another host, start diysca so that it sees the real client
+  address (uvicorn's `FORWARDED_ALLOW_IPS`), otherwise all users share the proxy's address. `0` turns the limit off.
 
 ## Roles
 

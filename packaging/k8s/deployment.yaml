@@ -25,6 +25,10 @@ spec:
             - { name: DIYSCA_CONFIG, value: /config/config.yml }
             - name: DIYSCA_DATABASE_URL
               valueFrom: { secretKeyRef: { name: diysca-db, key: url } }
+            # the web login: diysca refuses to listen on the network without one (or configure OIDC in config.yml)
+            - { name: DIYSCA_WEB_USER, value: admin }
+            - name: DIYSCA_WEB_PASSWORD
+              valueFrom: { secretKeyRef: { name: diysca-web, key: password } }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

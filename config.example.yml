@@ -110,6 +110,10 @@ sources: []
 base_url: https://diysca.example.org   # used for links in alerts
 # web_user: admin                 # set both to enable basic auth (put a TLS reverse proxy in front!)
 # web_password: change-me
+# Without a login diysca only listens on 127.0.0.1, and with api_tokens set the web UI is closed.
+# allow_no_login: false           # true lifts both (lab setups only)
+# login_max_failures: 5           # failed logins per address before it has to wait (0 = no limit)
+# login_lockout_seconds: 300      # first wait; doubles with each further failure, at most 1 h
 
 # Self-hosted repositories that diysca may update when a fix is released upstream but
 # missing from your mirror (Patching > Repositories, or `diysca repo-update NAME --run`).
