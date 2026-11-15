@@ -57,6 +57,12 @@ def token_user(name: str, conf: dict) -> User:
     return User(name=f"token:{name}", role=role, kind="token", hosts=hosts)
 
 
+def ui_open() -> bool:
+    """True when no login is configured for the web UI: anyone who reaches the port acts as admin."""
+    from diysca.auth import oidc
+    return not (settings.web_user and settings.web_password) and not oidc.configured()
+
+
 def basic_ok(creds: HTTPBasicCredentials | None) -> bool:
     return bool(settings.web_user and settings.web_password and creds
                 and secrets.compare_digest(creds.username, settings.web_user)

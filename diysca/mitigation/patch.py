@@ -20,6 +20,7 @@ import yaml
 
 from diysca import __version__
 from diysca.core import db, scope
+from diysca.core.versions import max_version
 from diysca.mitigation import pbsafe
 
 
@@ -78,12 +79,18 @@ def build_playbook(finding_ids: list[int]) -> tuple[str, dict]:
                     ORDER BY h.name, f.package""", finding_ids)
     per_host: dict[str, dict] = {}
     manual: dict[str, list[str]] = defaultdict(list)
+    # One line per language package and location, with the version that fixes all of its selected CVEs.
+    lang: dict[tuple, dict] = {}
     for f in rows:
         where = f["host_name"]
         if f["ecosystem"]:
-            manual["Language packages (bump the dependency in the application and redeploy)"].append(
-                f"{where}: {f['ecosystem']} {f['package']} {f['version']} -> {f['fixed_version'] or 'no fix yet'}"
-                f" ({f['vuln_id']}) in {f['location'] or '?'}")
+            g = lang.setdefault((where, f["ecosystem"], f["package"], f["version"], f["location"] or "?"),
+                                {"fixed": [], "cves": [], "unfixed": 0})
+            g["cves"].append(f["vuln_id"])
+            if f["fixed_version"]:
+                g["fixed"].append(f["fixed_version"])
+            else:
+                g["unfixed"] += 1
             continue
         if f["host_kind"] == "container":
             manual["Container images (rebuild the image with updated packages and redeploy)"].append(
@@ -101,6 +108,14 @@ def build_playbook(finding_ids: list[int]) -> tuple[str, dict]:
                                                   "os_id": f["os_id"] or "", "cves": set(), "binaries": set()})
         h["cves"].add(f["vuln_id"])
         h["binaries"].update(b for b in (f["binaries"] or f["package"]).split(",") if b)
+
+    for (where, eco, pkg, ver, loc), g in lang.items():
+        target = max_version(eco, g["fixed"])
+        to = f">= {target}" if target else "no fix yet"
+        if target and g["unfixed"]:
+            to += f" ({g['unfixed']} CVE(s) without a fix yet)"
+        manual["Language packages (bump the dependency in the application and redeploy)"].append(
+            f"{where}: {eco} {pkg} {ver} -> {to} ({', '.join(sorted(set(g['cves'])))}) in {loc}")
 
     plays = []
     n_pkgs = 0

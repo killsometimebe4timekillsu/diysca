@@ -18,6 +18,16 @@ from diysca.scanning.sbom import sbom_json
 
 
 def main(argv=None):
+    try:
+        _main(argv)
+    except BrokenPipeError:  # `diysca findings | head`: the reader went away, that's fine
+        import os
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        sys.exit(0)
+
+
+def _main(argv=None):
     ap = argparse.ArgumentParser("diysca", description="poor man's DIY CVE scanner")
     ap.add_argument("-c", "--config", help="config.yml (default: ./config.yml or $DIYSCA_CONFIG)")
     ap.add_argument("--version", action="version", version=__version__)
@@ -140,7 +150,12 @@ def main(argv=None):
     if a.cmd == "serve":
         import uvicorn
 
+        from diysca.core.security import ui_open
         from diysca.web import app
+        if ui_open() and a.host not in ("127.0.0.1", "::1", "localhost"):
+            logging.warning("No login configured (web_user/web_password or OIDC) and listening on %s:%s: anyone who "
+                            "can reach this port has admin access. Configure a login or use --host 127.0.0.1.",
+                            a.host, a.port)
         uvicorn.run(app, host=a.host, port=a.port, proxy_headers=True)
     elif a.cmd == "desktop":
         import threading

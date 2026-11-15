@@ -253,7 +253,6 @@ async def enrich_nvd(host_ids: list[int] | None = None) -> int:
     try:
         n = await nvd_enrich(host_ids=host_ids)
         if n:
-            db.event("feed", f"NVD: added scores for {n} CVEs")
             await events.emit_async("scans.finished", host_ids=host_ids or [])
         return n
     except Exception as e:
@@ -304,10 +303,22 @@ async def scan_all(client: OSVClient | None = None, host_ids: list[int] | None =
         return list(results)
 
 
+def _first_scan_delay() -> float:
+    """Seconds until the first scheduled scan: a restart doesn't rescan everything if the last scan is recent."""
+    from datetime import datetime, timezone
+    interval = settings.scan_interval_hours * 3600
+    r = db.q1("SELECT MAX(last_scan) last FROM hosts")
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(r["last"])).total_seconds()
+    except (TypeError, ValueError):
+        return 10
+    return max(10.0, interval - age)
+
+
 async def scheduler():
     if settings.scan_interval_hours <= 0:
         return
-    await asyncio.sleep(10)
+    await asyncio.sleep(_first_scan_delay())
     while True:
         try:
             await scan_all()
