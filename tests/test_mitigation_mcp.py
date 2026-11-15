@@ -35,6 +35,8 @@ def test_lifecycle(monkeypatch):
     mitigate.report(m["id"], "running", "token:ci", "ansible started")
     done, rescan = mitigate.report(m["id"], "done", "token:ci", "ok=3 changed=1")
     assert done["status"] == "done" and rescan == [1]
+    full = mitigate.get(m["id"])
+    assert full["finished_at"] and full["verified"].endswith("/" + str(len(full["findings"])))
     assert "ok=3 changed=1" in mitigate.get(m["id"])["log"]
     assert db.q1("SELECT COUNT(*) n FROM patch_runs WHERE kind='mitigation'")["n"] == 1
 
