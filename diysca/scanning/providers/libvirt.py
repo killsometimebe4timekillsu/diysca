@@ -44,7 +44,7 @@ def discover(cfg: dict, transport=None, run=None):
             ip = None
             for src in ("lease", "agent", "arp"):
                 try:
-                    m = _ADDR.search(run(["-c", uri, "domifaddr", name, "--source", src]))
+                    m = _ADDR.search(run(["-c", uri, "domifaddr", "--domain", name, "--source", src]))
                 except ProviderError:
                     continue
                 if m and not m.group(2).startswith("127."):
@@ -52,7 +52,7 @@ def discover(cfg: dict, transport=None, run=None):
                     break
             platform = ""
             try:
-                if "microsoft.com/win" in run(["-c", uri, "dumpxml", name]):  # libosinfo id in the domain metadata
+                if "microsoft.com/win" in run(["-c", uri, "dumpxml", "--domain", name]):  # libosinfo id in the domain metadata
                     platform = "windows"
             except ProviderError:
                 pass

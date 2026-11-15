@@ -74,6 +74,17 @@ if modules.enabled("auth"):
     _rbac.install(app)
 
 
+@app.middleware("http")
+async def _block_cross_site_changes(request: Request, call_next):
+    """CSRF: a change (anything but GET/HEAD/OPTIONS) that a browser sends from another site is refused.
+    Bearer tokens are exempt, because a browser never adds those by itself."""
+    if request.method not in ("GET", "HEAD", "OPTIONS") and \
+            not request.headers.get("authorization", "").lower().startswith("bearer ") and \
+            not security.same_origin(request):
+        return JSONResponse({"detail": "cross-site request blocked: open diysca directly and try again"}, 403)
+    return await call_next(request)
+
+
 # --------------------------------------------------------------- pages
 @app.get("/")
 def dashboard(request: Request):
@@ -159,13 +170,13 @@ def save_filter(name: str = Form(...), page: str = Form(...), query: str = Form(
     if page not in ("systems", "packages", "findings"):
         raise HTTPException(400)
     db.x("INSERT INTO saved_filters(name,page,query) VALUES (?,?,?)", (name, page, query))
-    return RedirectResponse(f"/{page}?{query}", 303)
+    return RedirectResponse(security.safe_next(f"/{page}?{query}", f"/{page}"), 303)
 
 
 @app.post("/filters/{fid}/delete")
 def del_filter(fid: int, back: str = Form("/")):
     db.x("DELETE FROM saved_filters WHERE id=?", (fid,))
-    return RedirectResponse(back, 303)
+    return RedirectResponse(security.safe_next(back), 303)
 
 
 # ------------------------------------------------------------------ MCP

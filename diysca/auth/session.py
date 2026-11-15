@@ -28,7 +28,7 @@ def secret() -> bytes:
     try:
         _secret_cache = path.read_bytes().strip()
     except FileNotFoundError:
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         key = secrets.token_hex(32).encode()
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "wb") as fh:

@@ -15,6 +15,9 @@ class Settings:
     db_path: str = ""  # SQLite only. default: <data_dir>/diysca.db
     inventories: list[str] = field(default_factory=list)  # Ansible inventory files/dirs
     use_ansible_inventory_cli: bool = True
+    # Directories the web UI may import further inventories from (Systems > Import Ansible inventory).
+    # Empty: only the inventories listed above, and files below those that are directories.
+    inventory_dirs: list[str] = field(default_factory=list)
 
     ssh_user: str = ""
     ssh_key: str = ""

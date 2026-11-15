@@ -12,13 +12,15 @@ from fastapi.responses import RedirectResponse, Response
 from diysca.auth import oidc, rbac, session
 from diysca.core import db
 from diysca.core.config import settings
-from diysca.ui import render, templates
+from diysca.core.security import safe_next
+from diysca.ui import csv_cell, render, templates
 
 router = APIRouter()
 
 
 @router.get("/login", include_in_schema=False)
 def login(request: Request, next: str = "/", error: str = ""):
+    next = safe_next(next)  # shown as a link and used after login: only paths on this site
     if not oidc.configured() or error:
         return templates.TemplateResponse(request, "login.html", {"error": error, "oidc": oidc.configured(),
                                                                   "basic": bool(settings.web_user), "next": next},
@@ -28,7 +30,7 @@ def login(request: Request, next: str = "/", error: str = ""):
     except (oidc.OIDCError, httpx.HTTPError) as e:
         return RedirectResponse("/login?" + urlencode({"error": f"Login provider not reachable: {e}"}), 303)
     r = RedirectResponse(url, 303)
-    r.set_cookie(session.FLOW_COOKIE, session.sign(flow, 600), **session.cookie_kwargs(600))
+    r.set_cookie(session.FLOW_COOKIE, session.sign({**flow, "t": "flow"}, 600), **session.cookie_kwargs(600))
     return r
 
 
@@ -37,6 +39,8 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "",
     if error:
         return RedirectResponse("/login?" + urlencode({"error": f"{error}: {error_description}"}), 303)
     flow = session.verify(request.cookies.get(session.FLOW_COOKIE))
+    if flow and flow.get("t") != "flow":  # a login cookie is not a flow cookie, and the other way round
+        flow = None
     try:
         info = oidc.finish(code, state, flow or {})
     except (oidc.OIDCError, httpx.HTTPError) as e:
@@ -52,8 +56,8 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "",
     rbac.record(user.name, "login", detail=f"role {user.role}" + (f", systems {','.join(user.hosts)}" if user.hosts else ""),
                 role=user.role, ip=ip)
     max_age = settings.session_hours * 3600
-    r = RedirectResponse((flow or {}).get("next") or "/", 303)
-    r.set_cookie(session.COOKIE, session.sign({"u": user.name, "r": user.role, "h": user.hosts, "e": user.email,
+    r = RedirectResponse(safe_next((flow or {}).get("next")), 303)
+    r.set_cookie(session.COOKIE, session.sign({"t": "login", "u": user.name, "r": user.role, "h": user.hosts, "e": user.email,
                                                "g": user.groups[:50]}, max_age), **session.cookie_kwargs(max_age))
     r.delete_cookie(session.FLOW_COOKIE, path="/")
     return r
@@ -106,7 +110,7 @@ def audit_csv(request: Request):
     cols = ("at", "actor", "role", "action", "target", "detail", "status", "ip")
     w.writerow(cols)
     for r in rows:
-        w.writerow([r[c] if r[c] is not None else "" for c in cols])
+        w.writerow([csv_cell(r[c]) for c in cols])
     return Response(buf.getvalue(), media_type="text/csv",
                     headers={"Content-Disposition": 'attachment; filename="diysca-audit.csv"'})
 

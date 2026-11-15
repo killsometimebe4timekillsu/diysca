@@ -186,17 +186,31 @@ def _ids_from_filter(query: str) -> list[int]:
     return [r["id"] for r in db.q(sql, p)]
 
 
+def csv_cell(v):
+    """A CSV cell that a spreadsheet won't run as a formula. Host, package and actor names come from scanned
+    systems and logins; one that starts with = + - @ would be evaluated when the export is opened."""
+    v = "" if v is None else v
+    if isinstance(v, str) and v[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + v
+    return v
+
+
+def download_name(name: str) -> str:
+    """A file name that is safe inside a Content-Disposition header."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", str(name))[:100] or "diysca"
+
+
 def rows(r):
     return [dict(x) for x in r]
 
 
 
-_SECRET_KEYS = ("password", "token", "api_key", "secret")
+_SECRET_KEYS = ("password", "token", "api_key", "secret", "credential", "private_key")
 
 
 def _masked(v):
     if isinstance(v, dict):
-        return {k: ("***" if any(s in k for s in _SECRET_KEYS) and v[k] and not k.endswith("_env") else _masked(x))
+        return {k: ("***" if any(s in k for s in _SECRET_KEYS) and v[k] and not k.endswith(("_env", "_file")) else _masked(x))
                 for k, x in v.items()}
     if isinstance(v, list):
         return [_masked(x) for x in v]

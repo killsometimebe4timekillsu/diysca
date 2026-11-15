@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 
 from diysca.core import db, modules, scope
 from diysca.core.config import settings
+from diysca.core.security import safe_next
 from diysca.scanning import scanner, sources
 from diysca.scanning.describe import action_hint, format_finding
 from diysca.scanning.feeds import SEVERITY_ORDER
@@ -17,6 +18,7 @@ from diysca.ui import (
     _like,
     all_groups,
     check_host,
+    download_name,
     finding_query,
     hosts_query,
     package_query,
@@ -112,7 +114,7 @@ def finding_status(fid: int, status: str = Form(...), back: str = Form("/finding
         raise HTTPException(404)
     check_host(f["host_id"])
     db.x("UPDATE findings SET status=? WHERE id=?", (status, fid))
-    return RedirectResponse(back, 303)
+    return RedirectResponse(safe_next(back, "/findings"), 303)
 
 
 def _builtin_sources() -> list[dict]:
@@ -185,11 +187,10 @@ async def scan_all_now(request: Request):
     ids = [int(i) for i in form.getlist("host_id") if str(i).isdigit()]
     pats = str(form.get("hosts") or "")
     if form.get("selected") and not ids:
-        return RedirectResponse(str(form.get("back") or "/systems"), 303)
+        return RedirectResponse(safe_next(str(form.get("back") or ""), "/systems"), 303)
     sel = scanner.select_hosts(pats, ids)
     _bg_run(scanner.scan_all(host_ids=sel))
-    back = str(form.get("back") or "/systems")
-    return RedirectResponse(back if back.startswith("/") else "/systems", 303)
+    return RedirectResponse(safe_next(str(form.get("back") or ""), "/systems"), 303)
 
 
 @router.post("/systems/{host_id}/scan")
@@ -206,6 +207,8 @@ async def scan_one(host_id: int):
 @router.post("/systems")
 def add_system(name: str = Form(...), address: str = Form(""), port: int = Form(22), ssh_user: str = Form(""),
                groups: str = Form(""), connection: str = Form("ssh")):
+    if connection not in ("ssh", "local"):
+        raise HTTPException(400, "connection must be ssh or local")
     db.x("""INSERT INTO hosts(name,address,port,ssh_user,groups,connection,source) VALUES (?,?,?,?,?,?, 'manual')
             ON CONFLICT(name) DO UPDATE SET address=excluded.address, port=excluded.port, ssh_user=excluded.ssh_user,
             groups=excluded.groups, connection=excluded.connection""",
@@ -251,8 +254,28 @@ async def inventory_settings_import():
     return RedirectResponse("/settings/inventory?" + urlencode({"msg": f"Imported {n} systems."}), 303)
 
 
+def _inventory_path_allowed(path: str) -> bool:
+    """The web UI only reads inventories the config names, or files below `inventory_dirs` and below
+    configured inventory directories. Anything else would let a UI user read files of the diysca account
+    (an SSH key parses as a list of "hosts") or have ansible-inventory run a script as that account."""
+    from pathlib import Path
+    try:
+        want = Path(path).expanduser().resolve()
+    except (OSError, RuntimeError):
+        return False
+    for inv in settings.inventories:
+        base = Path(inv).expanduser().resolve()
+        if want == base or (base.is_dir() and base in want.parents):
+            return True
+    return any(Path(d).expanduser().resolve() in (want, *want.parents) for d in settings.inventory_dirs or [])
+
+
 @router.post("/inventory/import")
 def inventory_import(path: str = Form("")):
+    path = path.strip()
+    if path and not _inventory_path_allowed(path):
+        raise HTTPException(400, "This path is not a configured inventory. Add it to `inventories:` or allow its "
+                                 "directory with `inventory_dirs:` in config.yml, then import again.")
     paths = [path] if path else None
     n = scanner.import_inventories(paths)
     if path and path not in settings.inventories:
@@ -268,7 +291,7 @@ def sbom(host_id: int):
     if not h:
         raise HTTPException(404)
     return Response(sbom_json(host_id), media_type="application/vnd.cyclonedx+json",
-                    headers={"Content-Disposition": f'attachment; filename="{h["name"]}.cdx.json"'})
+                    headers={"Content-Disposition": f'attachment; filename="{download_name(h["name"])}.cdx.json"'})
 
 
 @router.get("/api/hosts", tags=["inventory"], summary="List systems")

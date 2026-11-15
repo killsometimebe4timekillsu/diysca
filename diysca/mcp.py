@@ -146,7 +146,8 @@ def _host_id(ref: str) -> int:
     row = db.q1("SELECT id FROM hosts WHERE name=?", (ref,))
     if not row and str(ref).isdigit():
         row = db.q1("SELECT id FROM hosts WHERE id=?", (int(ref),))
-    if not row:
+    from diysca.core import scope
+    if not row or not scope.allows(row["id"]):  # systems outside the token's scope don't exist for it
         raise ValueError(f"no system '{ref}'")
     return row["id"]
 

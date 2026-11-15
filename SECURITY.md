@@ -30,3 +30,19 @@ playbooks it generates, and the packages and OCI image built from this repositor
 
 Out of scope: vulnerabilities that diysca *reports* in your systems (that's its job), and problems that need
 an admin account to exploit, unless they let that admin break out of what diysca is meant to allow.
+
+## How diysca treats untrusted input
+
+* **Scanned systems are untrusted.** Package names, versions, repo URLs, file names and OS facts come from the
+  systems diysca scans, and a compromised system (or a container image built by someone else) controls them.
+  Generated playbooks only install packages whose names and versions look like real ones, mark every string with
+  template markers as `!unsafe` so Ansible never evaluates it, and keep values out of conditions. Still review a
+  playbook before you run it.
+* **The scan script** runs on the target as the SSH user, which often has more rights than the users who can
+  write below the scan paths. It never passes file names or file contents to a program as code.
+* **Repo indexes** are only fetched over http(s), never from loopback or link-local addresses (cloud metadata),
+  and with size limits.
+* **Browsers:** changes sent from another website are refused (CSRF), and redirects only go to diysca's own pages.
+* **No login configured means everyone on the network is an admin.** diysca warns about it at startup and on
+  every page. Set `web_user` / `web_password` or OIDC before you expose it.
+* **The web UI reads inventories only from configured paths** (`inventories`, `inventory_dirs`).

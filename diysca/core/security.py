@@ -38,7 +38,7 @@ def token_entry(token: str) -> tuple[str, dict] | None:
     """api_tokens: {name: "secret"} or {name: {token: "secret", role: operator, hosts: "group:dmz"}}."""
     for name, t in (settings.api_tokens or {}).items():
         conf = t if isinstance(t, dict) else {"token": t}
-        if conf.get("token") and secrets.compare_digest(str(conf["token"]), token):
+        if conf.get("token") and _same(conf["token"], token):
             return name, conf
     return None
 
@@ -63,10 +63,40 @@ def ui_open() -> bool:
     return not (settings.web_user and settings.web_password) and not oidc.configured()
 
 
+def _same(a: str, b: str) -> bool:
+    """Constant-time comparison that also takes non-ASCII input (compare_digest on str raises for it)."""
+    return secrets.compare_digest(str(a).encode(), str(b).encode())
+
+
 def basic_ok(creds: HTTPBasicCredentials | None) -> bool:
     return bool(settings.web_user and settings.web_password and creds
-                and secrets.compare_digest(creds.username, settings.web_user)
-                and secrets.compare_digest(creds.password, settings.web_password))
+                and _same(creds.username, settings.web_user) and _same(creds.password, settings.web_password))
+
+
+def safe_next(url: str | None, default: str = "/") -> str:
+    """A path on this site to redirect to, or `default`. Refuses other sites ("//evil.example", "https://...",
+    "/\\evil") and script URLs, so login and "back" links can't send people elsewhere."""
+    url = str(url or "")
+    if not url.startswith("/") or url.startswith("//") or "\\" in url or any(ord(c) < 0x20 for c in url):
+        return default
+    return url
+
+
+def same_origin(request: Request) -> bool:
+    """False when a browser sends this request from another site (CSRF). Browsers attach the basic-auth
+    login and the session cookie to such requests on their own, so every change made with them is checked.
+    Clients that send neither Origin nor Referer (curl, scripts) are not browsers and pass."""
+    from urllib.parse import urlsplit
+    h = request.headers
+    if h.get("sec-fetch-site", "").lower() == "cross-site":
+        return False
+    src = h.get("origin") or h.get("referer")
+    if not src:
+        return True
+    host = urlsplit(src).netloc.lower()
+    ours = {h.get("host", "").lower(), urlsplit(settings.base_url).netloc.lower()}
+    ours |= {x.strip().lower() for x in h.get("x-forwarded-host", "").split(",")}
+    return bool(host) and host in ours - {""}
 
 
 def set_user(request: Request, user: User):

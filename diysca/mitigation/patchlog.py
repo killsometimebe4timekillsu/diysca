@@ -106,11 +106,12 @@ def query(args: dict) -> dict:
 
 
 def to_csv(rows: list[dict]) -> str:
+    from diysca.ui import csv_cell
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(COLUMNS)
     for r in rows:
-        w.writerow([" ".join(r[c]) if isinstance(r[c], list) else ("" if r[c] is None else r[c]) for c in COLUMNS])
+        w.writerow([csv_cell(" ".join(r[c]) if isinstance(r[c], list) else r[c]) for c in COLUMNS])
     return buf.getvalue()
 
 
