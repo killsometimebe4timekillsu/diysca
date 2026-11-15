@@ -93,7 +93,7 @@ def _forbidden_address(host: str) -> str | None:
 async def _guard_request(request: httpx.Request):
     """Runs for every request, redirects included. The URLs are whatever the scanned system's repo files say."""
     if request.url.scheme not in ("http", "https"):
-        raise FetchError(f"unsupported URL scheme {request.url.scheme}")
+        raise FetchError(f"unsupported repo URL {str(request.url)[:80]}")
     why = await asyncio.to_thread(_forbidden_address, request.url.host)
     if why:
         raise FetchError(f"refusing to fetch {request.url}: {why}. Use repo_fetch: host for repos only the system "
@@ -122,6 +122,9 @@ class Fetcher:
             if not data:
                 raise FetchError(f"empty response for {url}")
             return data
+        if not url.startswith(("http://", "https://")):
+            raise FetchError(f"unsupported repo URL {url[:80]} (the scanner reads http and https repos; "
+                             "repo_fetch: host also reads file and ftp)")
         async with self.client.stream("GET", url) as r:
             if r.status_code != 200:
                 raise FetchError(f"HTTP {r.status_code} for {url}")
@@ -139,7 +142,8 @@ class Fetcher:
             try:
                 return u, _decompress(u, await self.get(u))
             except Exception as e:  # try next compression variant
-                errors.append(str(e))
+                if str(e) not in errors:
+                    errors.append(str(e))
         raise FetchError("; ".join(errors[-2:]))
 
     async def close(self):
@@ -212,15 +216,52 @@ def _yum_subst(url: str, facts: HostFacts) -> str:
     return url
 
 
-async def fetch_repo_index(fetcher: Fetcher, repo: Repo, facts: HostFacts) -> dict[str, tuple[str, str]]:
+async def _apt_base(fetcher: Fetcher, repo: Repo) -> str:
+    """The real base URL of an apt repo. apt's mirror method (`mirror+https://host/list`, `mirror://host/list`)
+    names a list of mirrors: fetch it and take the first entry. `mirror+file:` lists are read on the host during
+    the scan (collectors.resolve_mirror_files); one that is still here could not be read."""
+    url = repo.url
+    if url.startswith("mirror+file:"):
+        raise FetchError(f"mirror list /{url[len('mirror+file:'):].lstrip('/')} could not be read on the system")
+    if url.startswith(("mirror+http://", "mirror+https://", "mirror://")):
+        list_url = "http://" + url[len("mirror://"):] if url.startswith("mirror://") else url[len("mirror+"):]
+        for raw in (await fetcher.get(list_url)).decode(errors="replace").splitlines():
+            line = raw.split("#", 1)[0].split()
+            if line and line[0].startswith(("http://", "https://")):
+                return line[0].rstrip("/")
+        raise FetchError(f"mirror list {list_url[:80]} has no http(s) entry")
+    if not url.startswith(("http://", "https://", "file://", "ftp://")):
+        raise FetchError(f"unsupported repo URL {url[:80]}")  # cdrom:, s3:, tor+http:, ...
+    return url
+
+
+async def apt_priority(fetcher: Fetcher, repo: Repo, base: str | None = None) -> int:
+    """apt's default pin priority for the repo, from its Release file: 500, or 100 for `NotAutomatic: yes` with
+    `ButAutomaticUpgrades: yes` (backports), or 1 for `NotAutomatic: yes` alone (experimental). apt never picks a
+    candidate from such a repo while a normal repo offers one, so neither may diysca."""
+    base = base or await _apt_base(fetcher, repo)
+    where = f"{base}/{repo.suite.rstrip('/')}".replace("/./", "/") if repo.suite.endswith("/") else f"{base}/dists/{repo.suite}"
+    try:
+        text = (await fetcher.get(f"{where}/Release")).decode(errors="replace")[:20000]
+    except Exception:
+        return 500  # no Release file (some flat repos): a normal repo
+    head = {k.strip().lower(): v.strip().lower() for k, _, v in
+            (line.partition(":") for line in text.splitlines() if line[:1] not in (" ", "\t") and ":" in line)}
+    if head.get("notautomatic") != "yes":
+        return 500
+    return 100 if head.get("butautomaticupgrades") == "yes" else 1
+
+
+async def fetch_repo_index(fetcher: Fetcher, repo: Repo, facts: HostFacts, base: str | None = None) -> dict[str, tuple[str, str]]:
     if repo.kind == "apt":
         arch = facts.deb_arch or {"x86_64": "amd64", "aarch64": "arm64"}.get(facts.arch, facts.arch)
+        url = base or await _apt_base(fetcher, repo)
         bases = []
         if repo.suite.endswith("/"):  # flat repository
-            bases.append(f"{repo.url}/{repo.suite.rstrip('/')}/Packages".replace("/./", "/"))
+            bases.append(f"{url}/{repo.suite.rstrip('/')}/Packages".replace("/./", "/"))
         else:
             for comp in repo.components or ["main"]:
-                bases.append(f"{repo.url}/dists/{repo.suite}/{comp}/binary-{arch}/Packages")
+                bases.append(f"{url}/dists/{repo.suite}/{comp}/binary-{arch}/Packages")
         merged: dict[str, tuple[str, str]] = {}
         for b in bases:
             _, data = await fetcher.get_first([b + ".xz", b + ".gz", b])
@@ -248,12 +289,26 @@ async def fetch_repo_index(fetcher: Fetcher, repo: Repo, facts: HostFacts) -> di
     raise FetchError(f"unknown repo kind {repo.kind}")
 
 
+def _candidate(installed: str | None, by_priority: dict[int, str], pkg_type: str) -> str | None:
+    """What the package manager would install: among the versions that are no downgrade, the one from the repo with
+    the highest priority. The installed version itself counts with priority 100, as in apt."""
+    for prio in sorted(by_priority, reverse=True):
+        v = by_priority[prio]
+        if installed is None:
+            return v
+        if prio < 100:
+            return None  # e.g. experimental: never chosen over what is installed
+        if compare(pkg_type, v, installed) >= 0:
+            return v
+    return None
+
+
 async def collect_repo_versions(facts: HostFacts, transport=None):
-    """Returns (name -> newest version across all repos, per-repo status list)."""
-    newest: dict[str, str] = {}
+    """Returns (name -> the version the system would upgrade to, per-repo status list)."""
+    offers: dict[str, dict[int, str]] = {}  # name -> {repo priority: newest version at that priority}
     statuses = []
     if settings.repo_fetch == "off":
-        return newest, [(r, "skipped", "repo_fetch=off", 0) for r in facts.repos]
+        return {}, [(r, "skipped", "repo_fetch=off", 0) for r in facts.repos]
     fetcher = Fetcher(transport)
     try:
         for repo in facts.repos:
@@ -264,17 +319,27 @@ async def collect_repo_versions(facts: HostFacts, transport=None):
             try:
                 cached = _CACHE.get(key)
                 if cached and time.time() - cached[0] < CACHE_TTL:
-                    idx = cached[1]
+                    idx, prio = cached[1], cached[2]
                 else:
-                    full = await fetch_repo_index(fetcher, repo, facts)
+                    base = await _apt_base(fetcher, repo) if repo.kind == "apt" else None
+                    full = await fetch_repo_index(fetcher, repo, facts, base)
                     idx = {n: v for n, (v, _s) in full.items()}
-                    _CACHE[key] = (time.time(), idx)
+                    prio = await apt_priority(fetcher, repo, base) if repo.kind == "apt" else 500
+                    _CACHE[key] = (time.time(), idx, prio)
                 for n, v in idx.items():
-                    if n not in newest or compare(facts.pkg_type, v, newest[n]) > 0:
-                        newest[n] = v
-                statuses.append((repo, "ok", "", len(idx)))
+                    have = offers.setdefault(n, {})
+                    if prio not in have or compare(facts.pkg_type, v, have[prio]) > 0:
+                        have[prio] = v
+                statuses.append((repo, "ok", "" if prio == 500 else f"priority {prio}: only used for packages "
+                                 "already installed from it", len(idx)))
             except Exception as e:
                 statuses.append((repo, "error", str(e)[:500], 0))
     finally:
         await fetcher.close()
+    installed = {p.name: p.version for p in facts.packages}
+    newest = {}
+    for n, by_priority in offers.items():
+        v = _candidate(installed.get(n), by_priority, facts.pkg_type)
+        if v is not None:
+            newest[n] = v
     return newest, statuses
