@@ -23,6 +23,7 @@ echo '{SEP}rpm'; command -v rpm >/dev/null && rpm -qa --qf '%{{NAME}}\\t%{{EPOCH
 echo '{SEP}apk'; [ -r /lib/apk/db/installed ] && cat /lib/apk/db/installed
 echo '{SEP}apt-sources'; for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do [ -r "$f" ] && echo "#FILE $f" && cat "$f"; done
 echo '{SEP}apt-deb822'; for f in /etc/apt/sources.list.d/*.sources; do [ -r "$f" ] && echo "#FILE $f" && cat "$f" && echo; done
+echo '{SEP}apt-mirrors'; grep -ohs 'mirror+file:[^][:space:]]*' /etc/apt/sources.list /etc/apt/sources.list.d/*.list /etc/apt/sources.list.d/*.sources | sed 's|^mirror+file:/*|/|' | sort -u | while IFS= read -r f; do [ -r "$f" ] && echo "#FILE $f" && cat -- "$f" && echo; done
 echo '{SEP}yum-repos'; for f in /etc/yum.repos.d/*.repo /etc/zypp/repos.d/*.repo; do [ -r "$f" ] && echo "#FILE $f" && cat "$f"; done
 echo '{SEP}apk-repos'; [ -r /etc/apk/repositories ] && cat /etc/apk/repositories
 echo '{SEP}apache'
@@ -316,6 +317,33 @@ def parse_apache(text: str, packages: list[Package]) -> list[dict]:
     return out
 
 
+def parse_mirror_lists(text: str) -> dict[str, list[str]]:
+    """Mirror list files (apt's mirror method) -> {path: [url, ...]}. A line is a URL, optionally followed by
+    metadata such as `priority:1`; apt tries them in order."""
+    out: dict[str, list[str]] = {}
+    cur = None
+    for raw in text.splitlines():
+        if raw.startswith("#FILE "):
+            cur = out.setdefault(raw[6:].strip(), [])
+            continue
+        line = raw.split("#", 1)[0].split()
+        if cur is not None and line and line[0].startswith(("http://", "https://")):
+            cur.append(line[0].rstrip("/"))
+    return out
+
+
+def resolve_mirror_files(repos: list[Repo], lists: dict[str, list[str]]) -> list[Repo]:
+    """`mirror+file:///etc/apt/mirrors/debian.list` (the default on Debian cloud images) names a file with the real
+    repo URLs. Use the first one, as apt does. A list that could not be read leaves the repo as it is, so the scan
+    shows it as an error instead of dropping it."""
+    for r in repos:
+        if r.kind == "apt" and r.url.startswith("mirror+file:"):
+            urls = lists.get("/" + r.url[len("mirror+file:"):].lstrip("/"))
+            if urls:
+                r.url = urls[0]
+    return repos
+
+
 def parse_collect_output(output: str) -> HostFacts:
     s = split_sections(output)
     osr = parse_os_release(s.get("os-release", ""))
@@ -331,6 +359,7 @@ def parse_collect_output(output: str) -> HostFacts:
     )
     facts.packages = parse_dpkg(s.get("dpkg", "")) or parse_rpm(s.get("rpm", "")) or parse_apk_db(s.get("apk", ""))
     facts.apache = parse_apache(s.get("apache", ""), facts.packages)
-    facts.repos = (parse_apt_sources(s.get("apt-sources", "")) + parse_deb822(s.get("apt-deb822", ""))
+    facts.repos = (resolve_mirror_files(parse_apt_sources(s.get("apt-sources", "")) + parse_deb822(s.get("apt-deb822", "")),
+                                        parse_mirror_lists(s.get("apt-mirrors", "")))
                    + parse_yum_repos(s.get("yum-repos", "")) + parse_apk_repos(s.get("apk-repos", "")))
     return facts

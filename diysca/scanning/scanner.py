@@ -159,6 +159,11 @@ async def scan_host(host_id: int, client: OSVClient | None = None, send_alerts: 
             if not facts.packages:
                 raise RuntimeError("no package manager database found (dpkg/rpm/apk)")
             repo_versions, repo_status = await collect_repo_versions(facts, t)
+            failed = [(r, err) for r, st, err, _n in repo_status if st == "error"]
+            if failed:  # without its repos a system looks as if it had nothing to patch: say so
+                r, err = failed[0]
+                problems.append(f"{len(failed)} of {len(repo_status)} package repos could not be read, so fixes in "
+                                f"them are not seen (first: {r.url[:80]}: {err[:160]})")
             if settings.scan_languages:
                 paths = settings.lang_scan_paths if h["kind"] != "container" else settings.container_lang_scan_paths
                 try:
