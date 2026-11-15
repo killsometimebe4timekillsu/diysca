@@ -58,7 +58,7 @@ Every release ships the same app in four forms. Pick whichever fits your environ
 ### Native package (Debian/Ubuntu, RHEL/Rocky/Alma/SUSE)
 
 ```bash
-sudo apt install ./diysca_0.1.0_amd64.deb        # or: sudo dnf install ./diysca-0.1.0-1.x86_64.rpm
+sudo apt install ./diysca_0.2.0_amd64.deb        # or: sudo dnf install ./diysca-0.2.0-1.x86_64.rpm
 sudoedit /etc/diysca/config.yml                  # inventories, base_url, ...
 sudo -u diysca ssh-keygen -t ed25519 -f /var/lib/diysca/.ssh/id_ed25519 -N ''
 sudo systemctl enable --now diysca               # UI on 127.0.0.1:8080 (change in /etc/default/diysca)
@@ -103,9 +103,9 @@ Config: `--config /etc/diysca/config.yml` or `DIYSCA_CONFIG`; copy `config.examp
 ### AppImage
 
 ```bash
-chmod +x diysca-0.1.0-x86_64.AppImage
-./diysca-0.1.0-x86_64.AppImage          # starts the UI on 127.0.0.1:8765 and opens your browser
-./diysca-0.1.0-x86_64.AppImage scan     # or use it as the CLI
+chmod +x diysca-0.2.0-x86_64.AppImage
+./diysca-0.2.0-x86_64.AppImage          # starts the UI on 127.0.0.1:8765 and opens your browser
+./diysca-0.2.0-x86_64.AppImage scan     # or use it as the CLI
 ```
 
 ### Flatpak
@@ -192,7 +192,7 @@ diysca serve                            # UI + scheduler on :8080
 
 ```bash
 packaging/scripts/build-standalone.sh                                        # dist/diysca/ (PyInstaller bundle)
-ARCH=amd64 VERSION=0.1.0 nfpm package -f packaging/nfpm.yaml -p deb -t dist/ # .deb  (-p rpm for .rpm)
+ARCH=amd64 VERSION=0.2.0 nfpm package -f packaging/nfpm.yaml -p deb -t dist/ # .deb  (-p rpm for .rpm)
 packaging/scripts/build-appimage.sh                                          # needs appimagetool
 flatpak-builder --user --install --force-clean build/flatpak packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.yml
 ```
