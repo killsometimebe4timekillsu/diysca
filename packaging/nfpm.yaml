@@ -16,7 +16,7 @@ description: |
   Apprise alerts (ntfy, mail, ...), Ansible inventory import, web UI.
 vendor: diysca
 homepage: https://github.com/killsometimebe4timekillsu/diysca
-license: MIT
+license: GPL-3.0-or-later
 recommends:
   - postgresql
 contents:
@@ -40,6 +40,8 @@ contents:
       mode: 0640
   - src: README.md
     dst: /usr/share/doc/diysca/README.md
+  - src: LICENSE
+    dst: /usr/share/licenses/diysca/LICENSE
 scripts:
   postinstall: packaging/scripts/postinstall.sh
   preremove: packaging/scripts/preremove.sh

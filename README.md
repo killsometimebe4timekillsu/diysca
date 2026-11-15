@@ -7,7 +7,7 @@ diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent
 > but not audited. It connects to your systems over SSH and can generate and hand off patch playbooks, so
 > review what it does before you trust it in production: read generated playbooks before running them, give
 > its SSH user and API tokens only the rights they need, and treat findings as a starting point, not a
-> guarantee that a system is (or isn't) vulnerable. Provided as is, without warranty (MIT license).
+> guarantee that a system is (or isn't) vulnerable. Provided as is, without warranty (GNU GPL v3 or later, see [License](#license)).
 
 * **Public CVE sources:** [OSV.dev](https://osv.dev) is the main source. It aggregates the Debian, Ubuntu, Alpine, AlmaLinux, Rocky, SUSE and Red Hat security trackers, with exact fixed versions per distro release. **NVD** adds CVSS scores and descriptions, and **CISA KEV** flags known exploited CVEs.
 * **More CVE sources, your own included:** the Debian security tracker (adds CVEs Debian hasn't fixed yet), Alpine secdb, FIRST **EPSS** exploit probabilities, any OSV-format feed (a GHSA export, Go vulndb, your own advisories), and **custom JSON / YAML / CSV feeds** mapped field by field. Configure them in `config.yml` or on the **CVE sources** page. See [CVE sources](#cve-sources).
@@ -80,6 +80,19 @@ podman run -d --name diysca -p 8080:8080 \
 * **Compose-spec tools** (`podman compose`, `nerdctl compose`, …): use [`compose.yaml`](compose.yaml).
 * **Kubernetes:** run `kubectl apply -k packaging/k8s` with the manifests in [`packaging/k8s/`](packaging/k8s). They include PostgreSQL, run non-root with a read-only root filesystem, and use a ConfigMap and Secrets for the config, the SSH key and the database.
 * **Building the image yourself:** `podman build -f Containerfile -t diysca .` works, as does `buildah bud`, or any other OCI builder.
+
+### From source (pip)
+
+For a quick test on any Linux with Python 3.12 or newer:
+
+```bash
+sudo python3 -m venv /opt/diysca
+sudo /opt/diysca/bin/pip install "git+https://github.com/killsometimebe4timekillsu/diysca"
+sudo ln -s /opt/diysca/bin/diysca /usr/local/bin/diysca   # so `diysca` is on the PATH
+diysca serve                                              # UI on 127.0.0.1:8080
+```
+
+Config: `--config /etc/diysca/config.yml` or `DIYSCA_CONFIG`; copy `config.example.yml` to start. For PostgreSQL set `database_url`. The packages above set all of this up for you (system user, systemd unit, config).
 
 ### AppImage
 
@@ -239,3 +252,12 @@ GitHub Actions and GitLab CI examples: [docs/mitigations.md](docs/mitigations.md
 * Fat jars that nest other jars are only read one level deep.
 * Windows systems are inventoried but not matched against Microsoft's security updates (MSRC) yet.
 * OIDC ID token signatures aren't verified (the token comes straight from the provider over TLS, which the spec allows); issuer, audience, expiry and nonce are.
+
+## License
+
+Copyright (C) 2026 killsometimebe4timekillsu and contributors.
+
+diysca is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License
+as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
+It is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See [LICENSE](LICENSE) for the full text.
