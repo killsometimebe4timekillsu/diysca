@@ -82,7 +82,13 @@ async def _block_cross_site_changes(request: Request, call_next):
             not request.headers.get("authorization", "").lower().startswith("bearer ") and \
             not security.same_origin(request):
         return JSONResponse({"detail": "cross-site request blocked: open diysca directly and try again"}, 403)
-    return await call_next(request)
+    response = await call_next(request)
+    # no framing by other sites (clickjacking), no MIME sniffing, no URLs with filters leaking to other sites
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Content-Security-Policy", "frame-ancestors 'none'")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    return response
 
 
 # --------------------------------------------------------------- pages

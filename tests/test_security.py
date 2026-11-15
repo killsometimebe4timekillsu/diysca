@@ -162,7 +162,8 @@ def test_cross_site_changes_are_blocked(monkeypatch):
     assert c.post("/systems", data=form, **ok).status_code == 303  # curl, scripts: no Origin at all
     assert c.post("/api/scan?wait=false&hosts=nope", headers={"Origin": "https://evil.example",
                                                              "Authorization": "Bearer t1"}).status_code == 404
-    assert c.get("/systems", headers={"Origin": "https://evil.example"}).status_code == 200
+    r = c.get("/systems", headers={"Origin": "https://evil.example"})
+    assert r.status_code == 200 and r.headers["x-frame-options"] == "DENY" and r.headers["x-content-type-options"] == "nosniff"
 
 
 def test_redirect_targets_stay_on_this_site(monkeypatch):
