@@ -1,0 +1,36 @@
+name: Feature request
+description: Suggest something diysca should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe what you're trying to do and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like diysca to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: How do you work around it today?
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Scanning
+        - Inventory / providers
+        - CVE sources
+        - Alerts
+        - Patching / mitigations
+        - Login / roles
+        - API / MCP / CLI
+        - Web UI
+        - Packaging
+        - Other
