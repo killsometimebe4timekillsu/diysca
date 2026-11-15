@@ -210,7 +210,10 @@ async def call(name: str, args: dict, ctx: Context):
         return {"range": d["range"], "start": d["start"], "end": d["end"], "entries": d["rows"]}
     if name == "start_scan":
         if a.get("host"):
-            return await scanner.scan_host(_host_id(str(a["host"])))
+            hid = _host_id(str(a["host"]))
+            res = await scanner.scan_host(hid)
+            scanner.start_nvd_enrichment([hid])
+            return res
         sel = scanner.select_hosts(a.get("hosts"), a.get("host_ids"))
         if (a.get("hosts") or a.get("host_ids")) and not sel:
             raise ValueError("no system matches")

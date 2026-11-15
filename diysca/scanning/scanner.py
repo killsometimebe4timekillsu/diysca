@@ -237,7 +237,35 @@ def select_hosts(hosts: str | list[str] | None = None, ids: list[int] | None = N
     return out
 
 
-async def scan_all(client: OSVClient | None = None, host_ids: list[int] | None = None) -> list[dict]:
+_nvd_task: asyncio.Task | None = None
+
+
+async def enrich_nvd(host_ids: list[int] | None = None) -> int:
+    """NVD scores and descriptions for the scanned systems' CVEs (time-boxed), then alerts again, since
+    severities may have changed. Errors are logged, never raised."""
+    try:
+        n = await nvd_enrich(host_ids=host_ids)
+        if n:
+            db.event("feed", f"NVD: added scores for {n} CVEs")
+            await events.emit_async("scans.finished", host_ids=host_ids or [])
+        return n
+    except Exception as e:
+        db.event("feed", f"NVD enrichment failed: {e}")
+        return 0
+
+
+def start_nvd_enrichment(host_ids: list[int] | None = None):
+    """Run enrich_nvd in the background, one run at a time, so scans never wait for NVD's rate limits."""
+    global _nvd_task
+    if _nvd_task is not None and not _nvd_task.done():
+        return
+    _nvd_task = asyncio.get_running_loop().create_task(enrich_nvd(host_ids))
+
+
+async def scan_all(client: OSVClient | None = None, host_ids: list[int] | None = None,
+                   enrich: str = "background") -> list[dict]:
+    """enrich: "background" (server: NVD runs after the scan without blocking it), "inline" (CLI: time-boxed,
+    before returning) or "off"."""
     async with _scan_lock:
         if settings.inventories or settings.inventory_providers:
             await asyncio.to_thread(import_inventories)
@@ -259,10 +287,13 @@ async def scan_all(client: OSVClient | None = None, host_ids: list[int] | None =
             if own:
                 await client.close()
         try:
-            await nvd_enrich()
-            await events.emit_async("scans.finished", host_ids=ids)  # alerts: severities may have changed
+            await events.emit_async("scans.finished", host_ids=ids)
         except Exception as e:
-            db.event("feed", f"NVD enrichment failed: {e}")
+            db.event("alert", f"after-scan alerts failed: {e}")
+        if enrich == "inline":
+            await enrich_nvd(ids)
+        elif enrich == "background":
+            start_nvd_enrichment(ids)
         return list(results)
 
 
