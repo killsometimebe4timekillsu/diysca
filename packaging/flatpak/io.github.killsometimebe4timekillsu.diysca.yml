@@ -4,7 +4,7 @@
 #          flatpak run io.github.killsometimebe4timekillsu.diysca scan       (CLI)
 app-id: io.github.killsometimebe4timekillsu.diysca
 runtime: org.freedesktop.Platform
-runtime-version: '24.08'
+runtime-version: '26.08'
 sdk: org.freedesktop.Sdk
 command: diysca-launcher
 finish-args:
