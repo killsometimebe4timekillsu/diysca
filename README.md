@@ -92,6 +92,9 @@ sudo ln -s /opt/diysca/bin/diysca /usr/local/bin/diysca   # so `diysca` is on th
 diysca serve                                              # UI on 127.0.0.1:8080
 ```
 
+To update a source install to the latest commit, add `--force-reinstall --no-deps` (the version number only
+changes with releases, so a plain `--upgrade` sees nothing to do), then `sudo systemctl restart diysca` if you run it as a service.
+
 Config: `--config /etc/diysca/config.yml` or `DIYSCA_CONFIG`; copy `config.example.yml` to start. For PostgreSQL set `database_url`. The packages above set all of this up for you (system user, systemd unit, config).
 
 ### AppImage

@@ -349,3 +349,31 @@ def test_nvd_is_time_boxed_and_prioritised(monkeypatch):
     assert db.q1("SELECT severity FROM findings WHERE cve='CVE-2024-0002'")["severity"] == "CRITICAL"
     calls.clear()
     assert asyncio.run(feeds.nvd_enrich(budget=0)) == 1 and len(calls) == 1  # budget 0: one request, then stop
+
+
+def test_nvd_stops_on_5xx_and_logs(monkeypatch):
+    import asyncio
+    from diysca.scanning import feeds
+    ids = _hosts()
+    for i in range(5):
+        db.x("""INSERT INTO findings(host_id, vuln_id, cve, package, version, severity, status, first_seen, last_seen)
+                VALUES (?,?,?,?,?,?,'open',?,?)""", (ids["db1"], f"CVE-2024-100{i}", f"CVE-2024-100{i}", "p", "1",
+                                                     None, db.now(), db.now()))
+    calls = []
+
+    class Down:
+        def __init__(self, *a, **k): pass
+        async def __aenter__(self): return self
+        async def __aexit__(self, *a): return False
+        async def get(self, url, params=None):
+            calls.append(params["cveId"])
+            return httpx.Response(503, text="down")
+
+    async def no_sleep(s):
+        pass
+    monkeypatch.setattr(feeds.httpx, "AsyncClient", Down)
+    monkeypatch.setattr(feeds.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(settings, "nvd_enabled", True)
+    assert asyncio.run(feeds.nvd_enrich()) == 0 and len(calls) == 2
+    msg = db.q1("SELECT message FROM events WHERE kind='feed' ORDER BY id DESC")["message"]
+    assert "0 CVEs enriched, 5 still pending, stopped: NVD unavailable (HTTP 503)" in msg and "API key" in msg

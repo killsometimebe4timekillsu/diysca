@@ -253,7 +253,6 @@ async def enrich_nvd(host_ids: list[int] | None = None) -> int:
     try:
         n = await nvd_enrich(host_ids=host_ids)
         if n:
-            db.event("feed", f"NVD: added scores for {n} CVEs")
             await events.emit_async("scans.finished", host_ids=host_ids or [])
         return n
     except Exception as e:

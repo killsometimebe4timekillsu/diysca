@@ -289,6 +289,7 @@ async def nvd_enrich(limit: int = 200, host_ids: list[int] | None = None, budget
     deadline = asyncio.get_running_loop().time() + budget
     rows = [{"cve": c} for c in cves]
     delay = 0.7 if settings.nvd_api_key else 6.5
+    errors, stop = 0, ""
     headers = {"apiKey": settings.nvd_api_key} if settings.nvd_api_key else {}
     n = 0
     async with httpx.AsyncClient(timeout=settings.http_timeout, headers=headers,
@@ -316,13 +317,25 @@ async def nvd_enrich(limit: int = 200, host_ids: list[int] | None = None, budget
                          (cve, score, norm_sev(sev) if sev else "UNKNOWN", vector, desc, db.now()))
                     n += 1
                 elif resp.status_code in (403, 429):
-                    break  # rate limited: stop this run, the next one continues
-            except httpx.HTTPError:
+                    stop = f"rate limited (HTTP {resp.status_code})"
+                    break  # the next run continues
+                elif resp.status_code >= 500:
+                    errors += 1
+                    if errors >= 2:  # NVD is having a bad time: don't spend the budget waiting on it
+                        stop = f"NVD unavailable (HTTP {resp.status_code})"
+                        break
+            except httpx.HTTPError as e:
+                stop = f"connection error ({type(e).__name__})"
                 break
             if asyncio.get_running_loop().time() + delay > deadline:
+                stop = f"time budget ({budget:.0f} s) used"
                 break
             await asyncio.sleep(delay)
     apply_enrichment()
+    left = len(nvd_pending(limit=100000))
+    if stop or left:
+        db.event("feed", f"NVD: {n} CVEs enriched, {left} still pending" + (f", stopped: {stop}" if stop else "")
+                 + ("" if settings.nvd_api_key or not left else "; an NVD API key (nvd_api_key) makes this ~10x faster"))
     return n
 
 
