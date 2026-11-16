@@ -19,6 +19,8 @@ from diysca.ui import (
     all_groups,
     check_host,
     download_name,
+    FINDINGS_LIMIT,
+    finding_count,
     finding_query,
     hosts_query,
     package_query,
@@ -77,7 +79,8 @@ def system_detail(request: Request, host_id: int):
     repos = db.q("SELECT * FROM repos WHERE host_id=? ORDER BY kind, url, suite", (host_id,))
     pkgs = db.q("""SELECT pk.*, (SELECT COUNT(*) FROM findings f WHERE f.host_id=pk.host_id AND f.status='open'
                      AND f.ecosystem=pk.ecosystem AND (f.package=pk.source_name OR f.package=pk.name)) AS vuln_count
-                   FROM packages pk WHERE host_id=? AND (pk.name LIKE ? OR pk.source_name LIKE ?) ORDER BY vuln_count DESC, name""",
+                   FROM packages pk WHERE host_id=? AND (pk.name LIKE ? ESCAPE '\\' OR pk.source_name LIKE ? ESCAPE '\\')
+                   ORDER BY vuln_count DESC, name""",
                 (host_id, _like(args.get("pkg", "")), _like(args.get("pkg", ""))))
     return render(request, "system.html", h=h, findings=findings, repos=repos, pkgs=pkgs, args=args)
 
@@ -94,7 +97,9 @@ def findings(request: Request):
     args = dict(request.query_params)
     args.setdefault("status", "open")
     sql, p = finding_query(args)
-    return render(request, "findings.html", rows=db.q(sql, p), args=args, groups=all_groups(),
+    found = db.q(sql, p)
+    total = finding_count(args) if len(found) >= FINDINGS_LIMIT else len(found)
+    return render(request, "findings.html", rows=found, total=total, args=args, groups=all_groups(),
                   severities=SEVERITY_ORDER[2:], handoffs=_handoffs())
 
 

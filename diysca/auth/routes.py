@@ -58,7 +58,7 @@ def callback(request: Request, code: str = "", state: str = "", error: str = "",
     max_age = settings.session_hours * 3600
     r = RedirectResponse(safe_next((flow or {}).get("next")), 303)
     r.set_cookie(session.COOKIE, session.sign({"t": "login", "u": user.name, "r": user.role, "h": user.hosts, "e": user.email,
-                                               "g": user.groups[:50]}, max_age), **session.cookie_kwargs(max_age))
+                                               "g": rbac.bound_groups(user.groups)}, max_age), **session.cookie_kwargs(max_age))
     r.delete_cookie(session.FLOW_COOKIE, path="/")
     return r
 

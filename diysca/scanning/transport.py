@@ -27,7 +27,18 @@ class LocalTransport(Transport):
     async def run(self, cmd: str, binary: bool = False, timeout: int = 300):
         proc = await asyncio.create_subprocess_exec(
             "/bin/sh", "-c", cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        out, err = await asyncio.wait_for(proc.communicate(), timeout)
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout)
+        except (asyncio.TimeoutError, asyncio.CancelledError) as e:
+            # don't leave the shell (a long `find`, a hanging package manager) running after we gave up
+            try:
+                proc.kill()
+                await proc.wait()
+            except ProcessLookupError:
+                pass
+            if isinstance(e, asyncio.TimeoutError):
+                raise RuntimeError(f"command timed out after {timeout} s") from None
+            raise
         if proc.returncode not in (0, None) and not out:
             raise RuntimeError(err.decode(errors="replace").strip() or f"exit {proc.returncode}")
         return out if binary else out.decode(errors="replace")
@@ -57,8 +68,12 @@ class SSHTransport(Transport):
     async def run(self, cmd: str, binary: bool = False, timeout: int = 300):
         if self.conn is None:
             await self.connect()
-        res = await asyncio.wait_for(
-            self.conn.run(cmd, check=False, encoding=None if binary else "utf-8", errors="replace"), timeout)
+        try:
+            res = await asyncio.wait_for(
+                self.conn.run(cmd, check=False, encoding=None if binary else "utf-8", errors="replace"), timeout)
+        except asyncio.TimeoutError:
+            await self.close()  # ends the remote command with the session, and the next run reconnects
+            raise RuntimeError(f"command timed out after {timeout} s") from None
         if res.exit_status not in (0, None) and not res.stdout:
             err = res.stderr if isinstance(res.stderr, str) else (res.stderr or b"").decode(errors="replace")
             raise RuntimeError(err.strip() or f"exit {res.exit_status}")

@@ -128,8 +128,9 @@ async def repo_run(request: Request, name: str):
     except KeyError:
         raise HTTPException(404)
     if not dry and res.ok and form.get("rescan"):
-        ids = sorted({db.q1("SELECT id FROM hosts WHERE name=?", (p["host_name"],))["id"]
-                      for p in repomgr.pending_for(repomgr.get_manager(name))})
+        names = sorted({p["host_name"] for p in repomgr.pending_for(repomgr.get_manager(name))})
+        ids = [r["id"] for r in db.q(f"SELECT id FROM hosts WHERE name IN ({','.join('?' * len(names))})", names)] \
+            if names else []
         _bg_run(scanner.scan_all(host_ids=ids or None))
     return render(request, "patching.html", **{**_patching_ctx(), "result": res})
 
@@ -255,8 +256,16 @@ async def api_mitigation_create(request: Request):
     optional `note`, `handoff` (target name; without it, targets marked *auto* are used) and `rescan` (default
     true). Only open findings are taken. Token holders may approve when `agents_can_approve` is set, or when their token has `role: approver` or higher."""
     require(request, "approver")
-    body = await request.json()
-    ids = [int(i) for i in body.get("finding_ids") or []]
+    try:
+        body = await request.json()
+    except ValueError:
+        raise HTTPException(422, "the body must be JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(422, "the body must be a JSON object with finding_ids or filter")
+    raw = body.get("finding_ids") or []
+    if not isinstance(raw, list) or not all(isinstance(i, int) or (isinstance(i, str) and i.isdigit()) for i in raw):
+        raise HTTPException(422, "finding_ids must be a list of finding ids (numbers)")
+    ids = [int(i) for i in raw]
     if not ids and body.get("filter") is not None:
         ids = _ids_from_filter(str(body["filter"]))
     try:
@@ -280,8 +289,8 @@ def api_mitigation(mid: int):
 def api_mitigation_playbook(mid: int):
     """The Ansible playbook created at approval time, pinned to the versions your repos offered then.
     Items a playbook can't fix (language packages, images, fixes not yet in your repos) are comments at the top."""
-    m = db.q1("SELECT playbook FROM mitigations WHERE id=?", (mid,))
-    if not m or not mitigate._in_scope(mid):
+    m = mitigate.get(mid)
+    if not m:
         raise HTTPException(404)
     return Response(m["playbook"] or "", media_type="application/x-yaml",
                     headers={"Content-Disposition": f'attachment; filename="diysca-mitigation-{mid}.yml"'})
@@ -303,7 +312,12 @@ async def api_mitigation_report(request: Request, mid: int):
     """Body (JSON): `status` (`running`, `done` or `failed`) and optional `log` (text, e.g. the ansible output).
     On `done` the affected systems are rescanned in the background (unless the mitigation was created with
     `rescan: false`), and the channels that alerted about the findings are told."""
-    body = await request.json()
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(422, 'the body must be a JSON object like {"status": "done", "log": "..."}')
     try:
         m, rescan = await asyncio.to_thread(mitigate.report, mid, str(body.get("status") or ""), actor(request),
                                             str(body.get("log") or ""))
@@ -324,8 +338,10 @@ async def api_mitigation_cancel(request: Request, mid: int):
         body = await request.json()
     except ValueError:
         body = {}
+    if not isinstance(body, dict):
+        body = {}
     try:
-        return mitigate.cancel(mid, actor(request), str((body or {}).get("reason") or ""))
+        return mitigate.cancel(mid, actor(request), str(body.get("reason") or ""))
     except KeyError:
         raise HTTPException(404)
     except mitigate.MitigationError as e:

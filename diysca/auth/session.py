@@ -56,11 +56,13 @@ def verify(value: str | None) -> dict | None:
         return None
     body, mac = value.rsplit(".", 1)
     good = _b64(hmac.new(secret(), body.encode(), hashlib.sha256).digest())
-    if not hmac.compare_digest(mac, good):
+    if not hmac.compare_digest(mac.encode("utf-8", "replace"), good.encode()):  # str compare raises on non-ASCII
         return None
     try:
         data = json.loads(_unb64(body))
     except ValueError:
+        return None
+    if not isinstance(data, dict):
         return None
     if data.get("exp", 0) < time.time():
         return None

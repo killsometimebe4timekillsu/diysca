@@ -117,26 +117,69 @@ def _coerce(t, v):
     return v
 
 
-def load_settings(path: str | None = None) -> Settings:
+class ConfigError(Exception):
+    """The configuration can't be used. The message is written for the person who edits config.yml."""
+
+
+# what happened while loading: unknown keys (typos) and the like. Shown by `diysca` commands and at startup.
+warnings: list[str] = []
+
+
+def _set(s: Settings, f, value, where: str):
+    try:
+        setattr(s, f.name, _coerce(f.type, value))
+    except (TypeError, ValueError) as e:
+        raise ConfigError(f"{where}: {f.name} has the value {value!r}, which is not a valid "
+                          f"{getattr(f.type, '__name__', f.type)} ({e})") from None
+
+
+def load_settings(path: str | None = None, explicit: bool = False) -> Settings:
+    """`explicit`: the path was given on the command line (-c), so a missing file is an error. A missing
+    $DIYSCA_CONFIG is not: the OCI image sets it, and is often configured with environment variables only."""
     s = Settings()
+    warnings.clear()
     path = path or os.environ.get("DIYSCA_CONFIG") or default_config_path()
-    if path and Path(path).exists():
-        data = yaml.safe_load(Path(path).read_text()) or {}
+    if path and not Path(path).exists():
+        if explicit:
+            raise ConfigError(f"config file {path} does not exist")
+    elif path:
+        try:
+            data = yaml.safe_load(Path(path).read_text()) or {}
+        except OSError as e:
+            raise ConfigError(f"config file {path} can't be read: {e.strerror or e}") from None
+        except yaml.YAMLError as e:
+            mark = getattr(e, "problem_mark", None)
+            at = f" in line {mark.line + 1}" if mark else ""
+            raise ConfigError(f"config file {path} is not valid YAML{at}: {getattr(e, 'problem', None) or e}") from None
+        if not isinstance(data, dict):
+            raise ConfigError(f"config file {path} must hold settings as `name: value` lines")
+        names = {f.name for f in fields(s)}
+        unknown = sorted(k for k in data if k not in names)
+        if unknown:
+            import difflib
+            hints = []
+            for k in unknown:
+                near = difflib.get_close_matches(str(k), names, n=1)
+                hints.append(f"{k}" + (f" (did you mean {near[0]}?)" if near else ""))
+            warnings.append(f"{path}: unknown setting{'s' if len(unknown) > 1 else ''} ignored: {', '.join(hints)}")
         for f in fields(s):
             if f.name in data and data[f.name] is not None:
-                setattr(s, f.name, _coerce(f.type, data[f.name]))
+                _set(s, f, data[f.name], path)
     for f in fields(s):
         env = os.environ.get("DIYSCA_" + f.name.upper())
         if env is not None:
-            setattr(s, f.name, _coerce(f.type, env))
+            _set(s, f, env, "environment variable DIYSCA_" + f.name.upper())
     return s
 
 
-settings = load_settings()
+try:
+    settings = load_settings()
+except ConfigError as _e:  # diysca is an application: say what is wrong instead of a traceback at import
+    raise SystemExit(f"diysca: {_e}") from None
 
 
 def reload(path: str | None = None) -> Settings:
-    new = load_settings(path)
+    new = load_settings(path, explicit=bool(path))
     for f in fields(new):
         setattr(settings, f.name, getattr(new, f.name))
     return settings

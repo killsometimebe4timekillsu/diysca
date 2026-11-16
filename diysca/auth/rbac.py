@@ -101,6 +101,13 @@ def role_for(name: str, email: str, groups: list[str]) -> tuple[str | None, list
     return best, ([] if unscoped else hosts)
 
 
+def bound_groups(groups: list[str]) -> list[str]:
+    """The groups some binding names. Only these go into the session cookie: the role is worked out from them on
+    every request, and a user in hundreds of groups would otherwise get a cookie too large for the browser."""
+    pats = [str(b["group"]) for b in (settings.rbac or {}).get("bindings") or [] if "group" in b]
+    return [g for g in groups if any(fnmatch(g, pat) for pat in pats)][:200]
+
+
 def login_user(info: dict) -> User | None:
     role, hosts = role_for(info["name"], info.get("email", ""), info.get("groups", []))
     if not role:
@@ -113,8 +120,9 @@ def user_from_cookie(request: Request) -> User | None:
     d = session.verify(request.cookies.get(session.COOKIE))
     if not d or d.get("t") != "login" or not d.get("u") or d.get("r") not in ROLES:
         return None
-    return User(name=d["u"], role=d["r"], kind="oidc", hosts=d.get("h") or [], email=d.get("e", ""),
-                groups=d.get("g") or [])
+    # The role is worked out again from today's bindings, so removing a binding or changing its role or
+    # systems takes effect on the next request and not when the session runs out.
+    return login_user({"name": d["u"], "email": d.get("e", ""), "groups": d.get("g") or []})
 
 
 def _wants_html(request: Request) -> bool:

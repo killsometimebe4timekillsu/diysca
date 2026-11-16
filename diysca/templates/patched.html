@@ -44,7 +44,7 @@
   <h2>Patched CVEs <span class="muted">· {{ label }}{% if start %} · {{ start[:16]|replace('T',' ') }} → {{ end[:16]|replace('T',' ') }} UTC{% endif %}</span></h2>
   <form class="filters" method="get">
     <input type="hidden" name="range" value="{{ range }}">{% if range == 'custom' %}<input type="hidden" name="from" value="{{ args.get('from','') }}"><input type="hidden" name="to" value="{{ args.get('to','') }}">{% endif %}
-    <label>System<input name="host" value="{{ args.host or '' }}"></label>
+    <label>System<input name="host" value="{{ args.host or '' }}" placeholder="web*" title="The whole name; * stands for any text"></label>
     <label>Group<select name="group"><option value="">any</option>{% for g in groups %}<option {{ 'selected' if args.group==g }}>{{ g }}</option>{% endfor %}</select></label>
     <label>Min severity<select name="severity"><option value="">any</option>{% for s in severities %}<option {{ 'selected' if args.severity==s }}>{{ s }}</option>{% endfor %}</select></label>
     <label>Type<select name="eco"><option value="">all</option><option value="os" {{ 'selected' if args.eco=='os' }}>OS packages</option><option value="lang" {{ 'selected' if args.eco=='lang' }}>language packages</option></select></label>

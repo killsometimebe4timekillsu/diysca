@@ -140,7 +140,8 @@ class Fetcher:
         errors = []
         for u in urls:
             try:
-                return u, _decompress(u, await self.get(u))
+                data = await self.get(u)
+                return u, await asyncio.to_thread(_decompress, u, data)  # tens of MB: not on the event loop
             except Exception as e:  # try next compression variant
                 if str(e) not in errors:
                     errors.append(str(e))
@@ -265,7 +266,8 @@ async def fetch_repo_index(fetcher: Fetcher, repo: Repo, facts: HostFacts, base:
         merged: dict[str, tuple[str, str]] = {}
         for b in bases:
             _, data = await fetcher.get_first([b + ".xz", b + ".gz", b])
-            for n, (v, s) in parse_apt_packages(data.decode(errors="replace")).items():
+            parsed = await asyncio.to_thread(lambda d=data: parse_apt_packages(d.decode(errors="replace")))
+            for n, (v, s) in parsed.items():
                 if n not in merged or compare("deb", v, merged[n][0]) > 0:
                     merged[n] = (v, s)
         return merged
@@ -281,11 +283,11 @@ async def fetch_repo_index(fetcher: Fetcher, repo: Repo, facts: HostFacts, base:
             raise FetchError("primary metadata not found in repomd.xml")
         href = m.group(1).decode()
         _, primary = await fetcher.get_first([f"{base}/{href}"])
-        return parse_primary_xml(primary)
+        return await asyncio.to_thread(parse_primary_xml, primary)
     if repo.kind == "apk":
         arch = facts.arch or "x86_64"
         data = await fetcher.get(f"{repo.url}/{arch}/APKINDEX.tar.gz")
-        return parse_apkindex_tar(data)
+        return await asyncio.to_thread(parse_apkindex_tar, data)
     raise FetchError(f"unknown repo kind {repo.kind}")
 
 

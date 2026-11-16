@@ -243,7 +243,9 @@ def finish(code: str, state: str, flow: dict, transport=None) -> dict:
     if isinstance(groups, str):
         groups = [g.strip() for g in groups.split(",")]
     groups = [str(g).lstrip("/") for g in groups]  # Keycloak full-path groups: /secops -> secops
-    return {"name": str(name), "email": str(claims.get("email") or ""), "groups": groups, "claims": claims}
+    # An address the provider says it has not verified must not match an `email:` binding.
+    email = "" if claims.get("email_verified") in (False, "false") else str(claims.get("email") or "")
+    return {"name": str(name), "email": email, "groups": groups, "claims": claims}
 
 
 def logout_url() -> str | None:

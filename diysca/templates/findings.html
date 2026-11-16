@@ -4,7 +4,7 @@
 {{ m.view_tabs(page) }}
 <div class="card">
 <form class="filters" method="get">
-  <label>System<input name="host" value="{{ args.host or '' }}"></label>
+  <label>System<input name="host" value="{{ args.host or '' }}" placeholder="web*" title="The whole name; * stands for any text"></label>
   <label>Group<select name="group"><option value="">any</option>{% for g in groups %}<option {{ 'selected' if args.group==g }}>{{ g }}</option>{% endfor %}</select></label>
   <label>Package<input name="package" value="{{ args.package or '' }}" placeholder="openssl"></label>
   <label>CVE / advisory<input name="cve" value="{{ args.cve or '' }}" placeholder="CVE-2025-"></label>
@@ -23,7 +23,7 @@
 </form>
 {{ m.saved_bar(page, query_string, saved_filters) }}
 </div>
-<div class="card"><p class="muted">{{ rows|length }} findings · <a href="/api/findings?{{ query_string }}">JSON</a></p>
+<div class="card"><p class="muted">{% if total > rows|length %}<b class="bad">Showing the worst {{ rows|length }} of {{ total }} findings.</b> Narrow the filter to see the rest. "Everything in this filter" below still covers all {{ total }}. · {% else %}{{ rows|length }} findings · {% endif %}<a href="/api/findings?{{ query_string }}">JSON</a></p>
 <form id="patchform" method="post" action="/patch/playbook" class="inline">{% if has_module('mitigation') %}<button>Patch playbook for selected</button>{% endif %}</form>
 {% if has_module('mitigation') %}<form method="post" action="/patch/playbook" class="inline"><input type="hidden" name="filter" value="{{ query_string }}"><button class="secondary">Patch playbook for everything in this filter</button></form>{% endif %}
 {% if has_module('mitigation') and (not user or user.can('approver')) %}<details class="approve"><summary class="btnlike">Approve for mitigation…</summary>

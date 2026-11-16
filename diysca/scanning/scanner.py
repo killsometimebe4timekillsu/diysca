@@ -54,6 +54,18 @@ def import_inventories(paths: list[str] | None = None, providers: bool | None = 
             continue
         inventory_status[src] = {"at": db.now(), "ok": True, "hosts": len(hosts), "error": ""}
         path = src
+        taken = []
+        if src.startswith("provider:"):
+            # Names from a provider are cloud or hypervisor metadata (a VM's Name tag): whoever may tag a VM must not
+            # be able to take over the address, user and key of a system that came from somewhere else.
+            other = {r["name"] for r in db.q("SELECT name FROM hosts WHERE COALESCE(source, '') != ?", (src,))}
+            taken = sorted(h.name for h in hosts if h.name in other)
+            hosts = [h for h in hosts if h.name not in other]
+            if taken:
+                msg = (f"{len(taken)} system(s) skipped because another source already has a system of that name: "
+                       + ", ".join(taken[:10]) + (" ..." if len(taken) > 10 else ""))
+                inventory_status[src].update(hosts=len(hosts), error=msg)
+                db.event("inventory", f"{label}: {msg}")
         for h in hosts:
             db.x("""INSERT INTO hosts(name, address, port, ssh_user, key_file, connection, groups, source)
                     VALUES (?,?,?,?,?,?,?,?)
@@ -134,8 +146,26 @@ def store_results(host_id: int, facts: HostFacts, ecosystem: str | None, repo_ve
                           (now, cur, how, row["id"]))
 
 
+_host_locks: dict[int, tuple[asyncio.AbstractEventLoop, asyncio.Lock]] = {}
+
+
+def _host_lock(host_id: int) -> asyncio.Lock:
+    loop = asyncio.get_running_loop()
+    have = _host_locks.get(host_id)
+    if have is None or have[0] is not loop:  # the CLI runs several event loops one after the other
+        have = _host_locks[host_id] = (loop, asyncio.Lock())
+    return have[1]
+
+
 async def scan_host(host_id: int, client: OSVClient | None = None, send_alerts: bool = True,
                     with_containers: bool = True) -> dict:
+    """Scan one system. Two scans of the same system never overlap: the second waits for the first (the scheduler
+    and a click on Scan, or the rescan after a mitigation), so it always sees the state after it was asked."""
+    async with _host_lock(host_id):
+        return await _scan_host(host_id, client, send_alerts, with_containers)
+
+
+async def _scan_host(host_id: int, client: OSVClient | None, send_alerts: bool, with_containers: bool) -> dict:
     h = db.q1("SELECT * FROM hosts WHERE id=?", (host_id,))
     if h is None:
         raise KeyError(host_id)
@@ -192,8 +222,10 @@ async def scan_host(host_id: int, client: OSVClient | None = None, send_alerts: 
             lang_candidates = await correlate_lang(lang_pkgs, client)
         except Exception as e:
             problems.append(f"vulnerability feed error (language packages): {e}")
-        store_results(host_id, facts, eco, repo_versions, repo_status, candidates, lang_pkgs, lang_candidates)
-        apply_enrichment()
+        # database work for a few hundred packages: off the event loop, so the UI keeps answering during scans
+        await asyncio.to_thread(store_results, host_id, facts, eco, repo_versions, repo_status, candidates, lang_pkgs,
+                                lang_candidates)
+        await asyncio.to_thread(apply_enrichment)
         feed_err = "; ".join(problems) or None
         if feed_err:
             db.x("UPDATE hosts SET last_status='partial', last_error=? WHERE id=?", (feed_err[:1000], host_id))
@@ -290,7 +322,13 @@ async def scan_all(client: OSVClient | None = None, host_ids: list[int] | None =
 
         async def one(i):
             async with sem:
-                return await scan_host(i, client)
+                try:
+                    return await scan_host(i, client)
+                except Exception as e:  # one system must never take the others (and the shared feed client) down
+                    log.exception("scan of system %s failed", i)
+                    h = db.q1("SELECT name FROM hosts WHERE id=?", (i,))
+                    db.event("scan", f"{h['name'] if h else i}: FAILED {e}")
+                    return {"host": h["name"] if h else str(i), "error": str(e)}
 
         try:
             results = await asyncio.gather(*(one(i) for i in ids))

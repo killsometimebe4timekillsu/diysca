@@ -75,6 +75,17 @@ def get(mid: int, with_playbook: bool = True) -> dict | None:
     out = dict(m)
     out["summary"] = json.loads(m["summary"] or "{}")
     out["findings"] = _findings(mid)
+    if not _all_in_scope(mid):
+        # A user limited to some systems sees their part only: not the other systems' findings, and not the
+        # playbook, which names every system and package in the mitigation.
+        total = len(out["findings"])
+        out["findings"] = [f for f in out["findings"] if scope.allows(f["host_id"])]
+        out["partial"] = f"{len(out['findings'])} of {total} findings are on systems you may see"
+        out["playbook"] = "# This mitigation also covers systems outside your scope, so its playbook is not shown.\n"
+        mine = {f["host"] for f in out["findings"]}
+        out["summary"] = {**out["summary"], "hosts": [h for h in out["summary"].get("hosts", []) if h in mine],
+                          "cves": sorted({f["vuln_id"] for f in out["findings"]})[:50],
+                          "cves_total": len({f["vuln_id"] for f in out["findings"]}), "findings": len(out["findings"])}
     out["hosts"] = sorted({f["host"] for f in out["findings"]})
     out["open_findings"] = sum(1 for f in out["findings"] if f["status"] == "open")
     # Same fields as the patch log: when it ended, and how many findings the rescan confirmed fixed.
@@ -116,6 +127,20 @@ def _in_scope(mid: int) -> bool:
         return True
     return bool(db.q1(f"""SELECT 1 x FROM mitigation_findings mf JOIN findings f ON f.id=mf.finding_id
                           WHERE mf.mitigation_id=?{scope.clause("f.host_id")} LIMIT 1""", (mid,)))
+
+
+def _all_in_scope(mid: int) -> bool:
+    """Acting on a mitigation (claim, report, cancel) touches every system in it: all of them must be in scope."""
+    if scope.current() is None:
+        return True
+    return all(scope.allows(r["host_id"]) for r in db.q(
+        """SELECT DISTINCT f.host_id FROM mitigation_findings mf JOIN findings f ON f.id=mf.finding_id
+           WHERE mf.mitigation_id=?""", (mid,)))
+
+
+def _need_all(mid: int, what: str):
+    if not _all_in_scope(mid):
+        raise MitigationError(f"mitigation #{mid} also covers systems outside your scope, so you can't {what} it")
 
 
 # ------------------------------------------------------------------ lifecycle
@@ -191,6 +216,7 @@ def claim(mid: int, by: str) -> dict:
     m = db.q1("SELECT status, claimed_by FROM mitigations WHERE id=?", (mid,))
     if not m or not _in_scope(mid):
         raise KeyError(mid)
+    _need_all(mid, "claim")
     if m["status"] != "approved":
         raise MitigationError(f"mitigation #{mid} is {m['status']}" +
                               (f" (claimed by {m['claimed_by']})" if m["claimed_by"] else ""))
@@ -210,6 +236,7 @@ def report(mid: int, status: str, by: str, log: str = "") -> tuple[dict, list[in
     m = db.q1("SELECT status, rescan, claimed_by FROM mitigations WHERE id=?", (mid,))
     if not m or not _in_scope(mid):
         raise KeyError(mid)
+    _need_all(mid, "report on")
     if m["status"] in ("done", "cancelled"):
         raise MitigationError(f"mitigation #{mid} is already {m['status']}")
     db.x("UPDATE mitigations SET status=?, claimed_by=COALESCE(claimed_by, ?), claimed_at=COALESCE(claimed_at, ?) WHERE id=?",
@@ -232,6 +259,7 @@ def cancel(mid: int, by: str, reason: str = "") -> dict:
     m = db.q1("SELECT status FROM mitigations WHERE id=?", (mid,))
     if not m or not _in_scope(mid):
         raise KeyError(mid)
+    _need_all(mid, "cancel")
     if m["status"] in ("done", "cancelled"):
         raise MitigationError(f"mitigation #{mid} is already {m['status']}")
     db.x("UPDATE mitigations SET status='cancelled' WHERE id=?", (mid,))

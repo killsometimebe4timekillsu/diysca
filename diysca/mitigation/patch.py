@@ -34,6 +34,8 @@ _Dumper = pbsafe.Dumper
 
 
 _ODD = "Skipped: unexpected characters in the package name or version (check the system, it may be tampered with)"
+_ODD_HOST = ("Skipped: the system name can't be used as an Ansible host (it would read as a pattern such as `all` "
+             "or `web*` and run on other systems). Rename the system, or patch it by hand")
 
 
 def _tasks_for(pkg_type: str, os_id: str, pins: list[str]) -> list[dict]:
@@ -130,6 +132,9 @@ def build_playbook(finding_ids: list[int]) -> tuple[str, dict]:
                     continue
                 pins.append(_pin(h["pkg_type"], b, p["repo_version"]))
         if not pins:
+            continue
+        if not pbsafe.host_ok(host):
+            manual[_ODD_HOST].append(f"{pbsafe.comment(host)}: {len(pins)} packages")
             continue
         n_pkgs += len(pins)
         plays.append({

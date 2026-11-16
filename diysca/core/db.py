@@ -188,6 +188,7 @@ def _migrate(c: sqlite3.Connection):
     if not _cols(c, "hosts"):
         return  # fresh database
     if c.execute("PRAGMA user_version").fetchone()[0] >= SCHEMA_VERSION:
+        _add_columns(c)  # cheap, and a column added without raising SCHEMA_VERSION still arrives
         return
     for col, typ in (("kind", "TEXT DEFAULT 'host'"), ("parent_id", "INTEGER REFERENCES hosts(id) ON DELETE CASCADE"),
                      ("container_runtime", "TEXT"), ("container_id", "TEXT"), ("image", "TEXT")):
@@ -209,6 +210,10 @@ def _migrate(c: sqlite3.Connection):
         c.execute(f"INSERT INTO findings({cols}) SELECT {cols} FROM findings_v1")
         c.execute("DROP TABLE findings_v1")
         c.execute("PRAGMA foreign_keys=ON")
+    _add_columns(c)
+
+
+def _add_columns(c: sqlite3.Connection):
     for table, col, typ in ADDED_COLUMNS:
         if _cols(c, table) and col not in _cols(c, table):
             c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {typ}")

@@ -43,7 +43,9 @@ both with `allow_no_login: true`. After 5 failed logins an address has to wait (
 * List endpoints take the **same query parameters as the filters in the UI**, so you can copy a filtered page's
   query string: `/findings?group=prod&fix=repo` → `/api/findings?group=prod&fix=repo`. The *JSON* link on the
   Findings and Patched pages does exactly that.
-* Text filters are case-insensitive substring matches; `*` is a wildcard.
+* Text filters are case-insensitive substring matches; `*` is a wildcard. The system filter (`host`) is the
+  exception: it matches the whole name or address, so `host=web1` is not `web10`. Use `host=web*` for a prefix.
+* `/api/findings` returns at most 5000 findings, worst first. Narrow the filter to get the rest.
 * Errors: `401` (no or wrong credentials), `403` (not allowed, e.g. a token approving), `404`, `409` (state
   conflict, e.g. claiming a mitigation someone else claimed), `422` (invalid input). The body is
   `{"detail": "…"}`.
@@ -246,7 +248,8 @@ JSON-RPC 2.0 for MCP clients (`initialize`, `tools/list`, `tools/call`, `ping`).
 
 ### GET /healthz
 
-`{"ok": true, "version": "0.2.3"}`, without authentication. Use it for container and orchestrator probes.
+`{"ok": true, "version": "0.2.4"}`, without authentication. Use it for container and orchestrator probes.
+While the database can't be reached it answers `503` with `{"ok": false, ...}`.
 
 ## Examples
 
