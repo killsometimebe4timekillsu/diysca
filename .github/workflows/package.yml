@@ -102,17 +102,34 @@ jobs:
           DIYSCA_DATA_DIR=/tmp/d diysca sbom self | head -c 400
 
   flatpak:
+    # Built on the runner with its own copy of the SDK. The flathub-infra build image has the SDK baked into an
+    # image layer; as soon as Flathub publishes a newer SDK, flatpak-builder tries to update it there and fails with
+    # "Invalid cross-device link" (seen with 24.08 and again with 26.08).
     runs-on: ubuntu-latest
-    container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-26.08
-      options: --privileged
+    env:
+      APP_ID: io.github.killsometimebe4timekillsu.diysca
     steps:
       - uses: actions/checkout@v4
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+      - name: install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends flatpak flatpak-builder
+          # the runner image restricts unprivileged user namespaces, which the build sandbox needs
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: build
+        run: |
+          flatpak-builder --user --install-deps-from=flathub --disable-rofiles-fuse --force-clean \
+            --repo=flatpak-repo flatpak-build packaging/flatpak/$APP_ID.yml
+          flatpak build-bundle flatpak-repo diysca.flatpak $APP_ID
+      - name: smoke test
+        run: |
+          flatpak install --user -y --noninteractive diysca.flatpak
+          flatpak run $APP_ID --version
+      - uses: actions/upload-artifact@v4
         with:
-          bundle: diysca.flatpak
-          manifest-path: packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.yml
-          cache-key: flatpak-builder-${{ github.sha }}
+          name: diysca-flatpak
+          path: diysca.flatpak
 
   oci:
     runs-on: ubuntu-latest
