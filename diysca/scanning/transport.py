@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import signal
 
 import asyncssh
 
@@ -26,15 +27,19 @@ class Transport:
 class LocalTransport(Transport):
     async def run(self, cmd: str, binary: bool = False, timeout: int = 300):
         proc = await asyncio.create_subprocess_exec(
-            "/bin/sh", "-c", cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            "/bin/sh", "-c", cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            start_new_session=True)  # its own process group, so a timeout can stop what the shell started too
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout)
         except (asyncio.TimeoutError, asyncio.CancelledError) as e:
             # don't leave the shell (a long `find`, a hanging package manager) running after we gave up
             try:
-                proc.kill()
-                await proc.wait()
-            except ProcessLookupError:
+                os.killpg(proc.pid, signal.SIGKILL)  # the shell and its children (`sh -c "find ..."` forks)
+            except (ProcessLookupError, PermissionError):
+                pass
+            try:
+                await asyncio.wait_for(proc.wait(), 5)
+            except (asyncio.TimeoutError, ProcessLookupError):
                 pass
             if isinstance(e, asyncio.TimeoutError):
                 raise RuntimeError(f"command timed out after {timeout} s") from None

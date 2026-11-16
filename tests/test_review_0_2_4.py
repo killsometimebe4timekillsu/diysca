@@ -155,7 +155,7 @@ def test_local_command_is_killed_on_timeout():
     async def go():
         t = tp.LocalTransport()
         with pytest.raises(Exception, match="timed out"):
-            await t.run("sleep 30", timeout=0.2)
+            await t.run("sleep 31 & sleep 30; true", timeout=0.2)   # a child of the shell, as dash runs it
     asyncio.run(asyncio.wait_for(go(), 5))
 
 
