@@ -30,3 +30,10 @@
 {% for key, href, label in items %}<a href="{{ href }}" class="{{ 'on' if p == key }}">{{ label }}</a>{% endfor %}
 </nav>{% endif %}
 {% endmacro %}
+{% macro repo_table(repos) %}
+<table><tr><th>Kind</th><th>URL</th><th>Suite / name</th><th>Components</th><th>Index</th><th>Packages</th><th>File</th></tr>
+{% for r in repos %}<tr><td>{{ r.kind }}</td><td class="mono">{{ r.url }}</td><td>{{ r.suite or "" }} {{ r.name or "" }}</td><td>{{ r.components or "" }}</td>
+<td class="{{ 'ok' if r.status=='ok' else 'bad' if r.status=='error' }}" title="{{ r.error or '' }}">{{ r.status or 'not read yet' }}{% if r.error %}: <small class="{{ 'muted' if r.status!='error' }}">{{ r.error[:160] }}</small>{% endif %}</td>
+<td>{{ r.pkg_count }}</td><td class="muted mono">{{ r.file }}</td></tr>
+{% else %}<tr><td colspan="7" class="muted">No repositories found. They are read at the next scan.</td></tr>{% endfor %}</table>
+{% endmacro %}

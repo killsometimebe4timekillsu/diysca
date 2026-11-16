@@ -120,3 +120,27 @@ def test_scan_reports_unreadable_repos(monkeypatch):
     res = asyncio.run(scanner.scan_host(1, client=FakeOSV()))
     assert "1 of 2 package repos could not be read" in res["error"] and "boom" in res["error"]
     assert db.q1("SELECT last_status FROM hosts WHERE id=1")["last_status"] == "partial"
+
+
+def test_repo_list_on_system_pages_and_api(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from diysca.core import db
+    from diysca.web import app
+    monkeypatch.setattr(settings, "allow_no_login", True)
+    db.x("INSERT INTO hosts(name,address) VALUES ('vm2','10.0.0.2'),('bare','10.0.0.3')")
+    db.x("""INSERT INTO repos(host_id,kind,url,suite,components,file,status,error,pkg_count) VALUES
+            (1,'apt','https://deb.debian.org/debian','trixie','main','/etc/apt/sources.list.d/debian.sources','ok','',68820),
+            (1,'apt','https://internal.example/apt','stable','main','/etc/apt/sources.list.d/x.list','error','HTTP 404 for x',0)""")
+    c = TestClient(app)
+    page = c.get("/systems/1").text
+    assert 'id="repos"' in page and "Repositories (2)" in page and "1 could not be read" in page
+    assert "https://deb.debian.org/debian" in page and "HTTP 404 for x" in page
+    assert page.index('id="repos"') < page.index('id="findings"')  # above the (long) findings table
+    lst = c.get("/systems").text
+    assert "https://internal.example/apt" in lst and "(1 failed)" in lst and '/systems/1#repos' in lst
+    assert "No repositories found" in c.get("/systems/2").text
+    api = c.get("/api/hosts/1/repos").json()
+    assert [(r["url"], r["status"], r["pkg_count"]) for r in api] == [
+        ("https://deb.debian.org/debian", "ok", 68820), ("https://internal.example/apt", "error", 0)]
+    assert c.get("/api/hosts/99/repos").status_code == 404

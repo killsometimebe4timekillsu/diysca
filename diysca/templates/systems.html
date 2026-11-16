@@ -27,7 +27,10 @@
 <td><a href="/systems/{{ h.id }}">{{ h.name }}</a>{% if h.kind=='container' %} <span class="tag" title="{{ h.image }}">container</span>{% endif %}{% if not h.enabled %} <span class="tag">disabled</span>{% endif %}</td>
 <td class="mono">{{ h.ssh_user ~ '@' if h.ssh_user }}{{ h.address }}{{ ':' ~ h.port if h.port and h.port != 22 }} {% if h.connection=='local' %}<span class="tag">local</span>{% endif %}</td>
 <td>{% for g in (h.groups or '').split(',') if g %}<a class="tag" href="/systems?group={{ g }}">{{ g }}</a>{% endfor %}</td>
-<td>{{ h.os_pretty or '–' }}</td><td>{{ h.pkg_count }}</td><td>{{ h.repo_count }}</td>
+<td>{{ h.os_pretty or '–' }}</td><td>{{ h.pkg_count }}</td>
+<td>{% set rs = repos.get(h.id, []) %}{% set bad = rs|selectattr('status','equalto','error')|list|length %}{% if rs %}<details><summary>{{ rs|length }}{% if bad %} <span class="bad">({{ bad }} failed)</span>{% endif %}</summary>
+{% for r in rs %}<div class="mono" style="white-space:nowrap" title="{{ r.error or '' }}"><span class="{{ 'ok' if r.status=='ok' else 'bad' if r.status=='error' else 'muted' }}">{{ '✔' if r.status=='ok' else '✘' if r.status=='error' else '–' }}</span> {{ r.url }} {{ r.suite or "" }} {{ r.name or "" }}</div>{% endfor %}
+<a href="/systems/{{ h.id }}#repos">details</a></details>{% else %}0{% endif %}</td>
 <td><a href="/findings?host={{ h.name }}">{{ h.open_count }}</a></td><td>{{ h.high_count }}</td><td>{{ h.fixable_count }}</td>
 <td class="{{ 'bad' if h.last_status=='error' }}" title="{{ h.last_error or '' }}">{{ (h.last_scan or 'never')[:16] }} {{ h.last_status or '' }}</td>
 <td style="white-space:nowrap"><form method="post" action="/systems/{{ h.id }}/scan" class="inline"><button class="secondary">Scan</button></form>
