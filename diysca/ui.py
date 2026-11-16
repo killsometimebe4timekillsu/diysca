@@ -40,10 +40,22 @@ def require(request: Request, role: str):
         raise HTTPException(403, f"needs the {role} role (you are {user.role})")
 
 
+def _bg_done(t: asyncio.Task):
+    _bg.discard(t)
+    if not t.cancelled() and t.exception() is not None:  # a background scan or refresh that died: say so
+        e = t.exception()
+        import logging
+        logging.getLogger("diysca").error("background task failed", exc_info=e)
+        try:
+            db.event("error", f"background task failed: {type(e).__name__}: {e}"[:500])
+        except Exception:  # noqa: BLE001
+            pass
+
+
 def _bg_run(coro):
     t = asyncio.create_task(coro)
     _bg.add(t)
-    t.add_done_callback(_bg.discard)
+    t.add_done_callback(_bg_done)
 
 
 def render(request: Request, name: str, **ctx):
@@ -60,21 +72,34 @@ def render(request: Request, name: str, **ctx):
     return templates.TemplateResponse(request, name, ctx)
 
 
+def _esc(v: str) -> str:
+    return v.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_").replace("*", "%")
+
+
 def _like(v: str) -> str:
-    return "%" + v.replace("*", "%") + "%"
+    """Substring match, * as wildcard."""
+    return "%" + _esc(v) + "%"
+
+
+def name_like(v: str) -> str:
+    """A system name matches as a whole: `web1` is not `web10`. Use * for the rest (`web*`)."""
+    return _esc(v.strip())
+
+
+LIKE = "LIKE ? ESCAPE '\\'"
 
 
 # ------------------------------------------------------------ filters
 def host_filter(args: dict, alias="h"):
     where, p = ["1=1" + scope.clause(f"{alias}.id")], []
     if args.get("host"):
-        where.append(f"({alias}.name LIKE ? OR {alias}.address LIKE ?)")
-        p += [_like(args["host"])] * 2
+        where.append(f"({alias}.name {LIKE} OR {alias}.address {LIKE})")
+        p += [name_like(args["host"])] * 2
     if args.get("group"):
         where.append(f"(',' || {alias}.groups || ',') LIKE ?")
         p.append(f"%,{args['group']},%")
     if args.get("os"):
-        where.append(f"({alias}.os_pretty LIKE ? OR {alias}.os_id LIKE ?)")
+        where.append(f"({alias}.os_pretty {LIKE} OR {alias}.os_id {LIKE})")
         p += [_like(args["os"])] * 2
     if args.get("kind") in ("host", "container"):
         where.append(f"{alias}.kind=?")
@@ -82,17 +107,38 @@ def host_filter(args: dict, alias="h"):
     return where, p
 
 
-def finding_query(args: dict):
+FINDINGS_LIMIT = 5000  # rows a list page or API list shows at most
+
+
+def finding_query(args: dict, limit: int | None = FINDINGS_LIMIT):
+    """SQL for the findings list. `limit=None` gives every match: anything that acts on "all findings in this
+    filter" (approve, playbook) must not stop at what a page can show."""
+    where, p = _finding_where(args)
+    sql = f"""SELECT f.*, h.name AS host_name, h.groups AS host_groups, mi.status AS mitigation_status
+              FROM findings f JOIN hosts h ON h.id=f.host_id LEFT JOIN mitigations mi ON mi.id=f.mitigation_id
+              WHERE {' AND '.join(where)}
+              ORDER BY f.kev DESC, CASE f.severity WHEN 'CRITICAL' THEN 5 WHEN 'HIGH' THEN 4 WHEN 'MEDIUM' THEN 3
+                       WHEN 'LOW' THEN 2 ELSE 1 END DESC, f.cvss_score DESC, h.name, f.package"""
+    return sql + (f" LIMIT {int(limit)}" if limit else ""), p
+
+
+def finding_count(args: dict) -> int:
+    where, p = _finding_where(args)
+    return db.q1(f"""SELECT COUNT(*) n FROM findings f JOIN hosts h ON h.id=f.host_id
+                     LEFT JOIN mitigations mi ON mi.id=f.mitigation_id WHERE {' AND '.join(where)}""", p)["n"]
+
+
+def _finding_where(args: dict):
     where, p = host_filter(args)
     status = args.get("status", "open")
     if status and status != "all":
         where.append("f.status=?")
         p.append(status)
     if args.get("package"):
-        where.append("(f.package LIKE ? OR f.binaries LIKE ?)")
+        where.append(f"(f.package {LIKE} OR f.binaries {LIKE})")
         p += [_like(args["package"])] * 2
     if args.get("cve"):
-        where.append("(f.vuln_id LIKE ? OR f.osv_ids LIKE ?)")
+        where.append(f"(f.vuln_id {LIKE} OR f.osv_ids {LIKE})")
         p += [_like(args["cve"])] * 2
     if args.get("severity"):
         allowed = [s for s in SEVERITY_ORDER if sev_rank(s) >= sev_rank(args["severity"])]
@@ -118,21 +164,16 @@ def finding_query(args: dict):
         where.append("mi.status IN ('approved','claimed','running')")
     elif args.get("approval") == "unapproved":
         where.append("(mi.id IS NULL OR mi.status NOT IN ('approved','claimed','running'))")
-    sql = f"""SELECT f.*, h.name AS host_name, h.groups AS host_groups, mi.status AS mitigation_status
-              FROM findings f JOIN hosts h ON h.id=f.host_id LEFT JOIN mitigations mi ON mi.id=f.mitigation_id
-              WHERE {' AND '.join(where)}
-              ORDER BY f.kev DESC, CASE f.severity WHEN 'CRITICAL' THEN 5 WHEN 'HIGH' THEN 4 WHEN 'MEDIUM' THEN 3
-                       WHEN 'LOW' THEN 2 ELSE 1 END DESC, f.cvss_score DESC, h.name, f.package LIMIT 5000"""
-    return sql, p
+    return where, p
 
 
 def package_query(args: dict):
     where, p = host_filter(args)
     if args.get("name"):
-        where.append("(pk.name LIKE ? OR pk.source_name LIKE ?)")
+        where.append(f"(pk.name {LIKE} OR pk.source_name {LIKE})")
         p += [_like(args["name"])] * 2
     if args.get("version"):
-        where.append("pk.version LIKE ?")
+        where.append(f"pk.version {LIKE}")
         p.append(_like(args["version"]))
     if args.get("vulnerable"):
         where.append("""EXISTS(SELECT 1 FROM findings f WHERE f.host_id=pk.host_id AND f.status='open'
@@ -182,7 +223,7 @@ def _ids_from_filter(query: str) -> list[int]:
     from urllib.parse import parse_qsl
     args = dict(parse_qsl(query))
     args.setdefault("status", "open")
-    sql, p = finding_query(args)
+    sql, p = finding_query(args, limit=None)
     return [r["id"] for r in db.q(sql, p)]
 
 

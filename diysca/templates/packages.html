@@ -6,7 +6,7 @@
 <form class="filters" method="get">
   <label>Package<input name="name" value="{{ args.name or '' }}" placeholder="postgresql*"></label>
   <label>Version<input name="version" value="{{ args.version or '' }}" placeholder="16."></label>
-  <label>System<input name="host" value="{{ args.host or '' }}"></label>
+  <label>System<input name="host" value="{{ args.host or '' }}" placeholder="web*" title="The whole name; * stands for any text"></label>
   <label>Group<select name="group"><option value="">any</option>{% for g in groups %}<option {{ 'selected' if args.group==g }}>{{ g }}</option>{% endfor %}</select></label>
   <label>OS<input name="os" value="{{ args.os or '' }}"></label>
   <label>Type<select name="eco"><option value="">all</option><option value="os" {{ 'selected' if args.eco=='os' }}>OS packages</option><option value="lang" {{ 'selected' if args.eco=='lang' }}>language packages</option>

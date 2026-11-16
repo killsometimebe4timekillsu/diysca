@@ -59,3 +59,16 @@ def word(value: str) -> str:
 def comment(text) -> str:
     """One line for a `# ...` comment: control characters and line breaks become spaces."""
     return _CTRL.sub(" ", str(text))[:500]
+
+
+_HOST = re.compile(r"^[0-9A-Za-z][0-9A-Za-z._\-]{0,252}$")
+_RESERVED_HOSTS = {"all", "ungrouped"}
+
+
+def host_ok(name) -> bool:
+    """True when a system name can stand alone in a play's `hosts:`. Ansible reads that line as a pattern: `all`,
+    `web*`, `a,b`, `a:b`, `!x` or `&y` would run the play on other systems than the one that was approved. System
+    names come from inventories and cloud metadata, so they are checked like everything else in a playbook."""
+    name = str(name or "")
+    return bool(_HOST.match(name)) and name.lower() not in _RESERVED_HOSTS
+

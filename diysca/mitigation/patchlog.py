@@ -21,6 +21,7 @@ import json
 
 from diysca.core import db, scope
 from diysca.mitigation.patched import RANGES, window
+from diysca.ui import LIKE, name_like
 
 KINDS = ("playbook", "repo", "mitigation", "reprovision")
 COLUMNS = ("id", "at", "kind", "status", "summary", "hosts", "findings", "cves", "approver", "approved_at",
@@ -85,8 +86,8 @@ def query(args: dict) -> dict:
         where.append("status=?")
         p.append(args["status"])
     if args.get("host"):
-        where.append("(',' || hosts || ',') LIKE ?")
-        p.append(f"%,{args['host'].replace('*', '%')},%")
+        where.append(f"(',' || hosts || ',') {LIKE}")
+        p.append(f"%,{name_like(args['host'])},%")
     for col in ("approver", "executor", "actor"):
         if args.get(col):
             where.append(f"{col} LIKE ?")

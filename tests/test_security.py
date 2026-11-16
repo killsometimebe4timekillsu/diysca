@@ -256,6 +256,7 @@ def test_login_cookie_and_flow_cookie_are_not_interchangeable(monkeypatch):
     flow = session.sign({"t": "flow", "u": "mallory", "r": "admin", "state": "s"}, 600)
     assert rbac.user_from_cookie(Req(flow)) is None
     assert rbac.user_from_cookie(Req(session.sign({"u": "old", "r": "admin"}, 600))) is None
+    monkeypatch.setattr(settings, "rbac", {"bindings": [{"user": "alice", "role": "viewer"}]})
     assert rbac.user_from_cookie(Req(session.sign({"t": "login", "u": "alice", "r": "viewer"}, 600))).name == "alice"
     assert os.stat(settings.data_dir).st_mode  # data dir exists
 

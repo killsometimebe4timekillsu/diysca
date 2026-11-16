@@ -8,11 +8,15 @@ from __future__ import annotations
 import asyncio
 import datetime
 import importlib
+import logging
 import os
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from diysca import __version__, mcp
 from diysca.core import db, modules, security, settings_io
@@ -74,6 +78,52 @@ if modules.enabled("auth"):
     _rbac.install(app)
 
 
+_ERROR_TITLES = {400: "That request can't be used", 403: "Not allowed", 404: "Not found", 405: "Not possible here",
+                 409: "Not possible right now", 422: "Something in the form is not valid", 500: "Something went wrong"}
+
+
+def _browser_page(request: Request) -> bool:
+    """A person in a browser (not the API, MCP or a script): they get a page, not a line of JSON."""
+    return not security.machine_path(request.url.path) and "text/html" in request.headers.get("accept", "")
+
+
+def _error_page(request: Request, status: int, message: str, hint: str = ""):
+    try:
+        resp = render(request, "error.html", title=_ERROR_TITLES.get(status, f"Error {status}"), message=message, hint=hint)
+        resp.status_code = status
+        return resp
+    except Exception:  # noqa: BLE001 - e.g. the database is down: the error page must not need it
+        return Response(f"diysca: {message}", status_code=status, media_type="text/plain")
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_error(request: Request, exc: StarletteHTTPException):
+    if exc.status_code in _ERROR_TITLES and _browser_page(request):
+        default = {404: "This page or item does not exist, or you may not see it.",
+                   405: "This address does not accept this kind of request."}
+        return _error_page(request, exc.status_code, str(exc.detail) if exc.detail and exc.detail != "Not Found"
+                           else default.get(exc.status_code, "The request was refused."))
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def _form_error(request: Request, exc: RequestValidationError):
+    if _browser_page(request):
+        what = "; ".join(f"{'.'.join(str(x) for x in e.get('loc', [])[1:]) or 'input'}: {e.get('msg', 'not valid')}"
+                         for e in exc.errors()[:8])
+        return _error_page(request, 422, what, "Go back, correct the value and send the form again.")
+    return await request_validation_exception_handler(request, exc)
+
+
+@app.exception_handler(Exception)
+async def _crash(request: Request, exc: Exception):
+    logging.getLogger("diysca").exception("unhandled error on %s %s", request.method, request.url.path)
+    if _browser_page(request):
+        return _error_page(request, 500, f"{type(exc).__name__} while handling this page.",
+                           "The details are in the diysca log. If it keeps happening, please report it.")
+    return JSONResponse({"detail": "internal error"}, 500)
+
+
 @app.middleware("http")
 async def _block_cross_site_changes(request: Request, call_next):
     """CSRF: a change (anything but GET/HEAD/OPTIONS) that a browser sends from another site is refused.
@@ -81,7 +131,12 @@ async def _block_cross_site_changes(request: Request, call_next):
     if request.method not in ("GET", "HEAD", "OPTIONS") and \
             not request.headers.get("authorization", "").lower().startswith("bearer ") and \
             not security.same_origin(request):
-        return JSONResponse({"detail": "cross-site request blocked: open diysca directly and try again"}, 403)
+        msg = "cross-site request blocked: open diysca directly and try again"
+        if _browser_page(request):
+            return _error_page(request, 403, "This change was sent from another site, so diysca refused it.",
+                               "Open diysca directly and try again. Behind a reverse proxy, make sure it passes "
+                               "the Host header on.")
+        return JSONResponse({"detail": msg}, 403)
     response = await call_next(request)
     # no framing by other sites (clickjacking), no MIME sniffing, no URLs with filters leaking to other sites
     response.headers.setdefault("X-Frame-Options", "DENY")
@@ -208,7 +263,12 @@ def mcp_get():
 
 @app.get("/healthz", tags=["health"], summary="Health check")
 def healthz():
-    """Always open, also with auth enabled. Use it for container and orchestrator probes."""
+    """Always open, also with auth enabled. Use it for container and orchestrator probes. Answers 503 while the
+    database can't be reached, so a probe sees more than "the process is up"."""
+    try:
+        db.q1("SELECT 1 AS ok")
+    except Exception as e:  # noqa: BLE001 - whatever the driver raises, the answer is "not healthy"
+        return JSONResponse({"ok": False, "version": __version__, "error": f"database: {type(e).__name__}"}, 503)
     return {"ok": True, "version": __version__}
 
 

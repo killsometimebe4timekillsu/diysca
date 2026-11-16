@@ -144,10 +144,20 @@ def _main(argv=None):
     s.add_argument("--by", default=os.environ.get("USER", "cli"), help="who approves / claims / reports")
 
     a = ap.parse_args(argv)
+    from diysca.core import config
     if a.config:
-        reload(a.config)
+        try:
+            reload(a.config)
+        except config.ConfigError as e:
+            sys.exit(f"diysca: {e}")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    db.connect()
+    for w in config.warnings:
+        logging.warning(w)
+    try:
+        db.connect()
+    except Exception as e:  # noqa: BLE001 - sqlite3 and psycopg raise unrelated types
+        where = "PostgreSQL (database_url)" if db.is_postgres() else f"the SQLite file {settings.database}"
+        sys.exit(f"diysca: can't open {where}: {str(e).strip().splitlines()[0]}")
 
     if a.cmd == "serve":
         import uvicorn
@@ -263,7 +273,7 @@ def _main(argv=None):
         from diysca.ui import finding_query
         args = dict(parse_qsl(a.filter))
         args.setdefault("status", "open")
-        sql, params = finding_query(args)
+        sql, params = finding_query(args, limit=None)
         rows = db.q(sql, params)
         if a.host:
             rows = [r for r in rows if r["host_name"] in a.host]

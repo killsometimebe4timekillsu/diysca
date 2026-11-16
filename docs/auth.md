@@ -30,7 +30,9 @@ ES256/384/512, or HS256/384/512 with the client secret), and its issuer, audienc
 
 Sessions are signed cookies (HttpOnly, SameSite=Lax, Secure when `base_url` is https), valid for
 `session_hours` (default 8). The signing key is `session_secret`, or a random key in `<data_dir>/session.key`.
-A role change takes effect at the next login.
+The role is worked out from `rbac.bindings` on every request, so changing or removing a binding takes effect
+at once. Group membership is read at login: a user added to a group at the identity provider signs in again.
+An address the provider marks `email_verified: false` does not match `email:` bindings.
 
 ## No login, failed logins
 
@@ -70,8 +72,9 @@ rbac:
 
 The highest matching role wins. `hosts` limits a binding to some systems, with the pattern syntax of alert
 subscriptions (`web*`, `group:prod`, `!test-*`). A user with a scope only sees those systems, their findings,
-mitigations and patch log entries, and can only scan and approve those. If one of the user's bindings for the
-winning role has no `hosts`, the user sees everything.
+mitigations and patch log entries, and can only scan and approve those. Of a mitigation that also covers other
+systems they see their own findings but not the playbook, and they can't claim, report on or cancel it. If one
+of the user's bindings for the winning role has no `hosts`, the user sees everything.
 
 API tokens get a role and a scope the same way:
 

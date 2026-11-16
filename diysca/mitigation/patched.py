@@ -16,6 +16,7 @@ from statistics import median
 
 from diysca.core import db, scope
 from diysca.scanning.feeds import SEVERITY_ORDER, sev_rank
+from diysca.ui import LIKE, name_like
 
 RANGES = {
     "last": "Since last patching",
@@ -68,8 +69,8 @@ def query(args: dict, now: datetime | None = None) -> dict:
         p += [start, end]
     if args.get("host"):
         for w, q in ((where, p), (still, sp)):
-            w.append("h.name LIKE ?")
-            q.append("%" + args["host"].replace("*", "%") + "%")
+            w.append(f"h.name {LIKE}")
+            q.append(name_like(args["host"]))
     if args.get("group"):
         for w, q in ((where, p), (still, sp)):
             w.append("(',' || h.groups || ',') LIKE ?")
