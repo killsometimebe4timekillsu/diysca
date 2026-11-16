@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "diysca"
-version = "0.2.4"
+version = "0.2.5"
 description = "Poor man's DIY CVE scanner: agentless SSH scans, OSV/NVD/KEV correlation, repo awareness, SBOMs, Apprise alerts"
 readme = "README.md"
 requires-python = ">=3.11"

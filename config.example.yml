@@ -62,8 +62,9 @@ container_sudo: false
 repo_fetch: scanner
 
 # Vulnerability data
-osv_mode: api                     # api = api.osv.dev | bulk = mirror per-distro zip locally (works offline/air-gapped)
-# osv_bulk_url: https://osv-vulnerabilities.storage.googleapis.com   # or file:///mirror (expects <Ecosystem>/all.zip)
+osv_mode: api                     # api = api.osv.dev | bulk = mirror the OSV export per ecosystem locally (works offline/air-gapped)
+# osv_bulk_url: https://osv-vulnerabilities.storage.googleapis.com   # or file:///mirror (expects <Ecosystem>/all.zip, e.g. Debian/all.zip)
+# ubuntu_pro_advisories: true     # also report Ubuntu packages whose fix is only in Ubuntu Pro (ESM), shown as "fix upstream"
 nvd_enabled: true
 nvd_api_key: ""                   # free key makes enrichment ~10x faster, see docs/nvd-api-key.md
 # NVD lookups run after scans in the background (CLI: before it returns), time-boxed per run:

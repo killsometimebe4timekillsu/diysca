@@ -135,7 +135,7 @@ def finding_status(fid: int, status: str = Form(...), back: str = Form("/finding
 
 
 def _builtin_sources() -> list[dict]:
-    bulk = db.q1("SELECT COUNT(*) n, MAX(fetched_at) at FROM osv_bulk_meta")
+    bulk = db.q1("SELECT COUNT(*) n, MAX(fetched_at) at FROM osv_bulk_meta WHERE ecosystem NOT LIKE 'zip:%'")
     return [
         {"name": "OSV.dev", "kind": f"vulnerabilities ({settings.osv_mode})",
          "url": settings.osv_bulk_url if settings.osv_mode == "bulk" else settings.osv_url, "enabled": True,

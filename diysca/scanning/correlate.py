@@ -1,8 +1,10 @@
 """Correlate installed packages x repo contents x vulnerability data."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
+from diysca.core.config import settings
 from diysca.core.versions import compare, max_version
 from diysca.scanning.collectors import HostFacts, Package
 from diysca.scanning.feeds import (
@@ -84,54 +86,89 @@ def query_units(facts: HostFacts) -> dict[tuple[str, str], list[Package]]:
     return units
 
 
+def pro_ecosystem(ecosystem: str) -> str | None:
+    """Ubuntu:24.04:LTS -> Ubuntu:Pro:24.04:LTS. Ubuntu publishes fixes for most universe packages only through
+    Ubuntu Pro (ESM), and OSV lists those under the Pro ecosystem alone. Without it such packages look clean."""
+    m = re.fullmatch(r"Ubuntu:(\d+\.\d+):LTS", ecosystem)
+    return f"Ubuntu:Pro:{m.group(1)}:LTS" if m and settings.ubuntu_pro_advisories else None
+
+
+PRO_NOTE = "Fixed only in Ubuntu Pro (ESM); no fix in the standard Ubuntu archive."
+
+
 async def correlate(facts: HostFacts, ecosystem: str, client: OSVClient,
                     repo_versions: dict[str, str]) -> list[Candidate]:
     pkg_type = facts.pkg_type
     units = query_units(facts)
     keys = list(units)
-    queries = [{"package": {"name": n, "ecosystem": ecosystem}, "version": v} for n, v in keys]
-    id_lists = await client.query_ids(queries)
-    all_ids = {i for ids in id_lists for i in ids}
-    vulns = await fetch_vulns(client, all_ids)
-
     out: dict[tuple[str, str], Candidate] = {}
-    for (name, version), ids in zip(keys, id_lists):
-        bins = sorted({p.name for p in units[(name, version)]})
-        display = units[(name, version)][0].source_name or name
-        repo_v = max_version(pkg_type, [repo_versions.get(b) for b in bins])
-        for vid in ids:
-            v = vulns.get(vid)
-            if not v or v.get("withdrawn"):
-                continue
-            entries = [a for a in v.get("affected") or []
-                       if a.get("package", {}).get("name") == name
-                       and eco_matches(a.get("package", {}).get("ecosystem", ""), ecosystem)]
-            fixed = None
-            if entries:
-                hits = [evaluate(a, version, pkg_type) for a in entries]
-                if not any(h for h, _ in hits):
-                    continue  # stale server-side match; trust the ranges
-                fixes = [f for h, f in hits if h and f]
-                fixed = max_version(pkg_type, fixes) if fixes else None
-            score, sev, _ = vuln_severity(v)
-            for cve in vuln_cves(v) or [v["id"]]:
-                key = (display, cve)
-                c = out.get(key)
-                if c is None:
-                    c = out[key] = Candidate(display, version, bins, cve, summary=v.get("summary") or "")
-                c.binaries = sorted(set(c.binaries) | set(bins))
-                if v["id"] not in c.osv_ids:
-                    c.osv_ids.append(v["id"])
-                if fixed and (c.fixed_version is None or compare(pkg_type, fixed, c.fixed_version) > 0):
-                    c.fixed_version = fixed
-                if sev_rank(sev) > sev_rank(c.severity):
-                    c.severity = sev
-                if score is not None and (c.cvss_score is None or score > c.cvss_score):
-                    c.cvss_score = score
-                if not c.summary and v.get("summary"):
-                    c.summary = v["summary"]
-                c.repo_version = repo_v
-                c.fix_in_repo = bool(repo_v and c.fixed_version and compare(pkg_type, repo_v, c.fixed_version) >= 0)
+    pro = pro_ecosystem(ecosystem)
+    passes = []
+    for eco in [ecosystem] + ([pro] if pro else []):
+        queries = [{"package": {"name": n, "ecosystem": eco}, "version": v} for n, v in keys]
+        id_lists = await client.query_ids(queries)
+        passes.append((eco, id_lists, await fetch_vulns(client, {i for ids in id_lists for i in ids})))
+    # Ubuntu notices (USN-...) list every CVE of an update, also ones that never applied to this release or were
+    # fixed earlier. Ubuntu's own per-CVE record (UBUNTU-CVE-...) says whether this version is affected, so a
+    # notice only names the CVEs whose record matched too; with none left it stands under its own id.
+    ubuntu_cves: dict[tuple[str, str], set[str]] = {}
+    for eco, id_lists, vulns in passes:
+        for (name, version), ids in zip(keys, id_lists):
+            got = ubuntu_cves.setdefault((name, version), set())
+            for i in ids:
+                v = vulns.get(i)
+                if i.startswith("UBUNTU-CVE-") and v and any(
+                        evaluate(a, version, pkg_type)[0] for a in v.get("affected") or []
+                        if a.get("package", {}).get("name") == name
+                        and eco_matches(a.get("package", {}).get("ecosystem", ""), eco)):
+                    got.add(i[len("UBUNTU-"):])
+    for eco, id_lists, vulns in passes:
+        covered = set(out) if eco == pro else set()  # a CVE the standard archive speaks to is not overridden
+        for (name, version), ids in zip(keys, id_lists):
+            bins = sorted({p.name for p in units[(name, version)]})
+            display = units[(name, version)][0].source_name or name
+            repo_v = max_version(pkg_type, [repo_versions.get(b) for b in bins])
+            for vid in ids:
+                v = vulns.get(vid)
+                if not v or v.get("withdrawn"):
+                    continue
+                entries = [a for a in v.get("affected") or []
+                           if a.get("package", {}).get("name") == name
+                           and eco_matches(a.get("package", {}).get("ecosystem", ""), eco)]
+                fixed = None
+                if entries:
+                    hits = [evaluate(a, version, pkg_type) for a in entries]
+                    if not any(h for h, _ in hits):
+                        continue  # stale server-side match; trust the ranges
+                    fixes = [f for h, f in hits if h and f]
+                    fixed = max_version(pkg_type, fixes) if fixes else None
+                score, sev, _ = vuln_severity(v)
+                cves = vuln_cves(v)
+                if v["id"].startswith("USN-") and eco.startswith("Ubuntu"):
+                    cves = [c for c in cves if c in ubuntu_cves[(name, version)]]
+                for cve in cves or [v["id"]]:
+                    key = (display, cve)
+                    if key in covered:
+                        continue
+                    c = out.get(key)
+                    if c is None:
+                        c = out[key] = Candidate(display, version, bins, cve, summary=v.get("summary") or "")
+                        if eco == pro:
+                            c.summary = (PRO_NOTE + " " + c.summary).strip()
+                    c.binaries = sorted(set(c.binaries) | set(bins))
+                    if v["id"] not in c.osv_ids:
+                        c.osv_ids.append(v["id"])
+                    if fixed and (c.fixed_version is None or compare(pkg_type, fixed, c.fixed_version) > 0):
+                        c.fixed_version = fixed
+                    if sev_rank(sev) > sev_rank(c.severity):
+                        c.severity = sev
+                    if score is not None and (c.cvss_score is None or score > c.cvss_score):
+                        c.cvss_score = score
+                    if not c.summary and v.get("summary"):
+                        c.summary = v["summary"]
+                    c.repo_version = repo_v
+                    c.fix_in_repo = bool(repo_v and c.fixed_version
+                                         and compare(pkg_type, repo_v, c.fixed_version) >= 0)
     return list(out.values())
 
 

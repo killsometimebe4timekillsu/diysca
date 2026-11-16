@@ -42,6 +42,7 @@ class Settings:
     osv_url: str = "https://api.osv.dev"
     osv_bulk_url: str = "https://osv-vulnerabilities.storage.googleapis.com"
     osv_bulk_hours: float = 12  # re-download bulk data after this many hours
+    ubuntu_pro_advisories: bool = True  # also match Ubuntu Pro (ESM) advisories: universe fixes often exist only there
     nvd_enabled: bool = True
     nvd_api_key: str = ""
     nvd_budget_seconds: float = 0  # time per enrichment run; 0 = 90 s without an API key, 600 s with one
