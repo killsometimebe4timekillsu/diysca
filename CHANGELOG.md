@@ -4,6 +4,11 @@ All notable changes to diysca. The format follows [Keep a Changelog](https://kee
 versions follow [Semantic Versioning](https://semver.org/). Only tagged versions are published as releases on
 GitHub; the others are on `main` and in the packages that CI builds for each commit.
 
+## [Unreleased]
+
+### Added
+- docs/comparison.md: Go and Rust programs on a test VM (gh, uv, fd) compared with Trivy and Grype.
+
 ## [0.2.7] - 2026-11-17
 
 ### Added
@@ -124,7 +129,8 @@ First version (#1 to #13).
   and Kubernetes.
 - Grafana-style web UI; native packages, AppImage, Flatpak and an OCI image.
 
-[0.2.7]: https://github.com/killsometimebe4timekillsu/diysca/compare/v0.2.3...main
+[Unreleased]: https://github.com/killsometimebe4timekillsu/diysca/compare/v0.2.3...main
+[0.2.7]: https://github.com/killsometimebe4timekillsu/diysca/pull/26
 [0.2.6]: https://github.com/killsometimebe4timekillsu/diysca/pull/25
 [0.2.5]: https://github.com/killsometimebe4timekillsu/diysca/pull/24
 [0.2.4]: https://github.com/killsometimebe4timekillsu/diysca/pull/23
