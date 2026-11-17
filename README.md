@@ -262,6 +262,10 @@ GitHub Actions and GitLab CI examples: [docs/mitigations.md](docs/mitigations.md
 * Windows systems are inventoried but not matched against Microsoft's security updates (MSRC) yet.
 * OIDC ID token signatures aren't verified (the token comes straight from the provider over TLS, which the spec allows); issuer, audience, expiry and nonce are.
 
+## Changes
+
+What changed in each version: [CHANGELOG.md](CHANGELOG.md).
+
 ## Issues and security
 
 Found a bug or want a feature? [Open an issue](https://github.com/killsometimebe4timekillsu/diysca/issues/new/choose).
