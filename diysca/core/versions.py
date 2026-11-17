@@ -246,7 +246,46 @@ def _pypi_compare(a: str, b: str) -> int | None:
     return (va > vb) - (va < vb)
 
 
+SEMVER_ECOSYSTEMS = {"Go", "npm", "crates.io"}
+_SEMVER = re.compile(r"^[vV]?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.\-]+))?(?:\+.*)?$")
+
+
+def _semver_compare(a: str, b: str) -> int | None:
+    """Semantic Versioning 2.0 precedence: everything after "-" is a pre-release, lower than the release, and
+    numeric identifiers rank below alphanumeric ones (so "1.21.0-0" is the lowest 1.21.0 pre-release, the
+    way OSV uses it in ranges). None when either string is not semver-shaped."""
+    ma, mb = _SEMVER.match(a.strip()), _SEMVER.match(b.strip())
+    if not ma or not mb:
+        return None
+    na = [int(x) for x in ma.group(1).split(".")]
+    nb = [int(x) for x in mb.group(1).split(".")]
+    width = max(len(na), len(nb), 3)
+    na += [0] * (width - len(na))
+    nb += [0] * (width - len(nb))
+    if na != nb:
+        return -1 if na < nb else 1
+    pa, pb = ma.group(2), mb.group(2)
+    if pa == pb:
+        return 0
+    if pa is None or pb is None:
+        return 1 if pa is None else -1
+    for x, y in zip(pa.split("."), pb.split(".")):
+        if x == y:
+            continue
+        if x.isdigit() and y.isdigit():
+            return -1 if int(x) < int(y) else 1
+        if x.isdigit() != y.isdigit():
+            return -1 if x.isdigit() else 1
+        return -1 if x < y else 1
+    la, lb = len(pa.split(".")), len(pb.split("."))
+    return (la > lb) - (la < lb)
+
+
 def lang_compare(ecosystem: str, a: str, b: str) -> int:
+    if ecosystem in SEMVER_ECOSYSTEMS:
+        r = _semver_compare(a, b)
+        if r is not None:
+            return r
     if ecosystem == "PyPI":
         r = _pypi_compare(a, b)
         if r is not None:

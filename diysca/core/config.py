@@ -31,6 +31,8 @@ class Settings:
     container_lang_scan_paths: list[str] = field(default_factory=lambda: [
         "/app", "/usr/src", "/usr/local", "/opt", "/srv", "/home", "/root", "/var/www", "/workspace"])
     lang_scan_timeout: int = 600
+    scan_binaries: bool = True  # Go modules / Go stdlib and Rust crates (cargo-auditable) compiled into programs
+    binary_scan_paths: list[str] = field(default_factory=list)  # empty: the language scan paths
     scan_containers: bool = True  # scan the images of running containers on each host
     container_runtimes: list[str] = field(default_factory=lambda: ["podman", "docker", "nerdctl", "crictl"])
     container_sudo: bool = False  # prefix runtime calls with "sudo -n"
