@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import math
 import re
 import time
@@ -19,6 +20,8 @@ import httpx
 
 from diysca.core import db
 from diysca.core.config import settings
+
+log = logging.getLogger(__name__)
 
 SEVERITY_ORDER = ["UNKNOWN", "NONE", "LOW", "MEDIUM", "HIGH", "CRITICAL"]
 CVE_RE = re.compile(r"^CVE-\d{4}-\d+$")
@@ -419,10 +422,18 @@ def _trim(v: dict, affected: list[dict]) -> dict:
     return keep
 
 
+STALE_DAYS = 14  # an OS or language feed whose newest change is older than this is out of date
+
+
+def _parse_ts(s: str) -> datetime:
+    d = datetime.fromisoformat(re.sub(r"(\.\d{6})\d+", r"\1", s.replace("Z", "+00:00")))
+    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+
+
 class BulkOSVClient:
     """OSV data mirrored from the public GCS bucket, matched locally.
 
-    Each distro release is one zip (e.g. Debian:12/all.zip). Good for
+    One zip per ecosystem (Debian/all.zip holds every Debian release). Good for
     air-gapped scanners: point osv_bulk_url at your own mirror of it.
     """
 
@@ -444,49 +455,85 @@ class BulkOSVClient:
                 age = datetime.now(timezone.utc) - datetime.fromisoformat(meta["fetched_at"])
                 if age < timedelta(hours=settings.osv_bulk_hours):
                     return meta["count"]
-            from pathlib import Path
-            from urllib.parse import quote
-            d = Path(settings.data_dir) / "osv"
-            d.mkdir(parents=True, exist_ok=True)
-            zpath = d / (eco.replace(":", "_").replace(" ", "_") + ".zip")
-            headers = {"If-None-Match": meta["etag"]} if meta and meta["etag"] and zpath.exists() else {}
-            # per-release zip (e.g. "Debian:12") when the bucket has one, else the whole ecosystem ("Red Hat", "SUSE")
-            base_eco = eco.split(":")[0]
-            url = f"{self.base}/{quote(eco)}/all.zip"
-            if not self.base.startswith("file://") and eco != base_eco:
-                head = await self.client.head(url)
-                if head.status_code == 404:
-                    url = f"{self.base}/{quote(base_eco)}/all.zip"
-            if self.base.startswith("file://"):
-                root = Path(self.base[7:])
-                src = root / eco / "all.zip"
-                if not src.exists():
-                    src = root / base_eco / "all.zip"
-                zpath.write_bytes(src.read_bytes())
-                etag = None
-            else:
-                async with self.client.stream("GET", url, headers=headers) as r:
-                    if r.status_code == 304:
-                        db.x("UPDATE osv_bulk_meta SET fetched_at=? WHERE ecosystem=?", (db.now(), eco))
-                        return meta["count"]
-                    if r.status_code != 200:
-                        raise RuntimeError(f"OSV bulk {url}: HTTP {r.status_code}")
-                    tmp = zpath.with_suffix(".part")
-                    with open(tmp, "wb") as fh:
-                        async for chunk in r.aiter_bytes(1 << 20):
-                            fh.write(chunk)
-                    tmp.replace(zpath)
-                    etag = r.headers.get("etag")
-            n = await asyncio.to_thread(self._load_zip, eco, zpath)
+            zpath, tag = await self._download(eco.split(":")[0] if ":" in eco else eco, eco, force)
+            if meta and tag and meta["etag"] == tag and not force:
+                db.x("UPDATE osv_bulk_meta SET fetched_at=? WHERE ecosystem=?", (db.now(), eco))
+                return meta["count"]
+            n, newest = await asyncio.to_thread(self._load_zip, eco, zpath)
             db.x("""INSERT INTO osv_bulk_meta VALUES (?,?,?,?) ON CONFLICT(ecosystem) DO UPDATE SET
-                    fetched_at=excluded.fetched_at, etag=excluded.etag, count=excluded.count""", (eco, db.now(), etag, n))
-            db.event("feed", f"OSV bulk {eco}: {n} package advisories loaded")
+                    fetched_at=excluded.fetched_at, etag=excluded.etag, count=excluded.count""", (eco, db.now(), tag, n))
+            db.event("feed", f"OSV bulk {eco}: {n} package advisories loaded, newest change {newest[:10] or 'unknown'}")
+            if newest and datetime.now(timezone.utc) - _parse_ts(newest) > timedelta(days=STALE_DAYS):
+                msg = (f"OSV bulk {eco}: the newest advisory change is from {newest[:10]}, so this data is out of date "
+                       f"and new CVEs are missed. Check osv_bulk_url ({self.base}) or use osv_mode: api.")
+                log.warning(msg)
+                db.event("feed", msg)
             return n
 
+    async def _download(self, name: str, eco: str, force: bool):
+        """-> (local zip, tag). `name` is the export to fetch: the whole ecosystem for distros ("Ubuntu", "Debian").
+
+        OSV stopped updating the per-release exports ("Debian:12/all.zip", "Ubuntu:24.04:LTS/all.zip") in
+        October 2024; they are still served, so a scanner using them silently missed every newer CVE. The
+        ecosystem export holds all releases and is filtered by release when it is loaded. It is downloaded once
+        for all releases of a distro. A file:// mirror may still hold per-release zips: those are used when the
+        ecosystem one is missing."""
+        from pathlib import Path
+        from urllib.parse import quote
+        lock = self._locks.setdefault("zip:" + name, asyncio.Lock())
+        async with lock:
+            d = Path(settings.data_dir) / "osv"
+            d.mkdir(parents=True, exist_ok=True)
+            zpath = d / (name.replace(":", "_").replace(" ", "_") + ".zip")
+            if self.base.startswith("file://"):
+                root = Path(self.base[7:])
+                src = root / name / "all.zip"
+                if not src.exists():
+                    src = root / eco / "all.zip"
+                st = src.stat()
+                tag = f"{src}:{st.st_size}:{int(st.st_mtime)}"
+                if not (zpath.exists() and self._zip_tag(name) == tag):
+                    zpath.write_bytes(src.read_bytes())
+                    self._set_zip_tag(name, tag)
+                return zpath, tag
+            meta = db.q1("SELECT * FROM osv_bulk_meta WHERE ecosystem=?", ("zip:" + name,))
+            if meta and zpath.exists() and not force:
+                age = datetime.now(timezone.utc) - datetime.fromisoformat(meta["fetched_at"])
+                if age < timedelta(hours=settings.osv_bulk_hours):
+                    return zpath, meta["etag"]
+            url = f"{self.base}/{quote(name)}/all.zip"
+            headers = {"If-None-Match": meta["etag"]} if meta and meta["etag"] and zpath.exists() else {}
+            async with self.client.stream("GET", url, headers=headers) as r:
+                if r.status_code == 304:
+                    self._set_zip_tag(name, meta["etag"])
+                    return zpath, meta["etag"]
+                if r.status_code != 200:
+                    raise RuntimeError(f"OSV bulk {url}: HTTP {r.status_code}")
+                tmp = zpath.with_suffix(".part")
+                with open(tmp, "wb") as fh:
+                    async for chunk in r.aiter_bytes(1 << 20):
+                        fh.write(chunk)
+                tmp.replace(zpath)
+                tag = r.headers.get("etag") or f"{url}:{db.now()}"
+            self._set_zip_tag(name, tag)
+            return zpath, tag
+
     @staticmethod
-    def _load_zip(eco: str, zpath) -> int:
+    def _zip_tag(name: str):
+        row = db.q1("SELECT etag FROM osv_bulk_meta WHERE ecosystem=?", ("zip:" + name,))
+        return row["etag"] if row else None
+
+    @staticmethod
+    def _set_zip_tag(name: str, tag: str):
+        db.x("""INSERT INTO osv_bulk_meta VALUES (?,?,?,0) ON CONFLICT(ecosystem) DO UPDATE SET
+                fetched_at=excluded.fetched_at, etag=excluded.etag""", ("zip:" + name, db.now(), tag))
+
+    @staticmethod
+    def _load_zip(eco: str, zpath) -> tuple[int, str]:
+        """-> (package advisories stored, newest `modified` of the advisories that apply to `eco`)."""
         import zipfile
         rows = []
+        newest = ""
         with zipfile.ZipFile(zpath) as zf:
             for info in zf.infolist():
                 if not info.filename.endswith(".json"):
@@ -503,13 +550,15 @@ class BulkOSVClient:
                         if eco == "PyPI":
                             name = re.sub(r"[-_.]+", "-", name).lower()
                         by_pkg.setdefault(name, []).append(a)
+                if by_pkg:
+                    newest = max(newest, str(v.get("modified") or ""))
                 for name, affs in by_pkg.items():
                     if name:
                         rows.append((eco, name, v["id"], json.dumps(_trim(v, affs))))
         with db.tx() as c:
             c.execute("DELETE FROM osv_bulk WHERE ecosystem=?", (eco,))
             c.executemany("INSERT INTO osv_bulk VALUES (?,?,?,?) ON CONFLICT(ecosystem, package, id) DO NOTHING", rows)
-        return len(rows)
+        return len(rows), newest
 
     async def query_ids(self, queries: list[dict]) -> list[list[str]]:
         from diysca.scanning.correlate import evaluate

@@ -61,7 +61,7 @@ Every release ships the same app in four forms. Pick whichever fits your environ
 ### Native package (Debian/Ubuntu, RHEL/Rocky/Alma/SUSE)
 
 ```bash
-sudo apt install ./diysca_0.2.4_amd64.deb        # or: sudo dnf install ./diysca-0.2.4-1.x86_64.rpm
+sudo apt install ./diysca_0.2.5_amd64.deb        # or: sudo dnf install ./diysca-0.2.5-1.x86_64.rpm
 sudoedit /etc/diysca/config.yml                  # inventories, base_url, ...
 sudo -u diysca ssh-keygen -t ed25519 -f /var/lib/diysca/.ssh/id_ed25519 -N ''
 sudo systemctl enable --now diysca               # UI on 127.0.0.1:8080 (change in /etc/default/diysca)
@@ -106,9 +106,9 @@ Config: `--config /etc/diysca/config.yml` or `DIYSCA_CONFIG`; copy `config.examp
 ### AppImage
 
 ```bash
-chmod +x diysca-0.2.4-x86_64.AppImage
-./diysca-0.2.4-x86_64.AppImage          # starts the UI on 127.0.0.1:8765 and opens your browser
-./diysca-0.2.4-x86_64.AppImage scan     # or use it as the CLI
+chmod +x diysca-0.2.5-x86_64.AppImage
+./diysca-0.2.5-x86_64.AppImage          # starts the UI on 127.0.0.1:8765 and opens your browser
+./diysca-0.2.5-x86_64.AppImage scan     # or use it as the CLI
 ```
 
 ### Flatpak
@@ -195,7 +195,7 @@ diysca serve                            # UI + scheduler on :8080
 
 ```bash
 packaging/scripts/build-standalone.sh                                        # dist/diysca/ (PyInstaller bundle)
-ARCH=amd64 VERSION=0.2.4 nfpm package -f packaging/nfpm.yaml -p deb -t dist/ # .deb  (-p rpm for .rpm)
+ARCH=amd64 VERSION=0.2.5 nfpm package -f packaging/nfpm.yaml -p deb -t dist/ # .deb  (-p rpm for .rpm)
 packaging/scripts/build-appimage.sh                                          # needs appimagetool
 flatpak-builder --user --install --force-clean build/flatpak packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.yml
 ```
@@ -230,7 +230,7 @@ Config is looked up in this order: `$DIYSCA_CONFIG`, then `./config.yml`, then `
 | `osv_mode` | how | when |
 |---|---|---|
 | `api` (default) | `api.osv.dev/v1/querybatch` per scan | normal internet access |
-| `bulk` | downloads `<Ecosystem>/all.zip` (e.g. `Debian:12`, ~50–150 MB) every `osv_bulk_hours` and matches locally | lots of hosts, flaky or limited egress, air-gapped (point `osv_bulk_url` at a `file://` mirror) |
+| `bulk` | downloads `<Ecosystem>/all.zip` (`Debian` ~45 MB, `Ubuntu` ~800 MB, one file for all releases) every `osv_bulk_hours` and matches locally. A warning appears under Events when the newest advisory in it is more than 14 days old | lots of hosts, flaky or limited egress, air-gapped (point `osv_bulk_url` at a `file://` mirror) |
 
 Supported distros: Debian, Ubuntu, Alpine, Rocky, AlmaLinux, RHEL (including 10), SLES (including 16) and openSUSE Leap. Fedora and Arch are not covered by OSV. CI install-tests the native packages on Debian 12, Ubuntu 22.04/24.04, AlmaLinux 8, Rocky 9, RHEL 10 (UBI 10) and SLES 16 (BCI 16).
 
