@@ -8,8 +8,8 @@ GitHub; the others are on `main` and in the packages that CI builds for each com
 
 ### Added
 - This changelog.
-- [docs/comparison.md](docs/comparison.md): what diysca finds compared with Trivy on the same system, and why the
-  numbers differ.
+- [docs/comparison.md](docs/comparison.md): what diysca finds compared with Trivy, Grype and OSV-Scanner on the
+  Debian test VMs and an Ubuntu 24.04 system, and why the numbers differ.
 
 ### Changed
 - README: the known limitations name what the Go and Rust program scan can't see, and no longer claim that OIDC

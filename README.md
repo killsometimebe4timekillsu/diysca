@@ -265,7 +265,7 @@ GitHub Actions and GitLab CI examples: [docs/mitigations.md](docs/mitigations.md
 
 ## Changes and comparison
 
-What changed in each version: [CHANGELOG.md](CHANGELOG.md). How diysca's findings compare with Trivy's on the same system: [docs/comparison.md](docs/comparison.md).
+What changed in each version: [CHANGELOG.md](CHANGELOG.md). How diysca's findings compare with Trivy, Grype and OSV-Scanner on the same systems: [docs/comparison.md](docs/comparison.md).
 
 ## Issues and security
 
