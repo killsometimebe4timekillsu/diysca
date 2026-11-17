@@ -61,7 +61,7 @@ Every release ships the same app in four forms. Pick whichever fits your environ
 ### Native package (Debian/Ubuntu, RHEL/Rocky/Alma/SUSE)
 
 ```bash
-sudo apt install ./diysca_0.2.6_amd64.deb        # or: sudo dnf install ./diysca-0.2.6-1.x86_64.rpm
+sudo apt install ./diysca_0.2.7_amd64.deb        # or: sudo dnf install ./diysca-0.2.7-1.x86_64.rpm
 sudoedit /etc/diysca/config.yml                  # inventories, base_url, ...
 sudo -u diysca ssh-keygen -t ed25519 -f /var/lib/diysca/.ssh/id_ed25519 -N ''
 sudo systemctl enable --now diysca               # UI on 127.0.0.1:8080 (change in /etc/default/diysca)
@@ -106,9 +106,9 @@ Config: `--config /etc/diysca/config.yml` or `DIYSCA_CONFIG`; copy `config.examp
 ### AppImage
 
 ```bash
-chmod +x diysca-0.2.6-x86_64.AppImage
-./diysca-0.2.6-x86_64.AppImage          # starts the UI on 127.0.0.1:8765 and opens your browser
-./diysca-0.2.6-x86_64.AppImage scan     # or use it as the CLI
+chmod +x diysca-0.2.7-x86_64.AppImage
+./diysca-0.2.7-x86_64.AppImage          # starts the UI on 127.0.0.1:8765 and opens your browser
+./diysca-0.2.7-x86_64.AppImage scan     # or use it as the CLI
 ```
 
 ### Flatpak
@@ -195,7 +195,7 @@ diysca serve                            # UI + scheduler on :8080
 
 ```bash
 packaging/scripts/build-standalone.sh                                        # dist/diysca/ (PyInstaller bundle)
-ARCH=amd64 VERSION=0.2.6 nfpm package -f packaging/nfpm.yaml -p deb -t dist/ # .deb  (-p rpm for .rpm)
+ARCH=amd64 VERSION=0.2.7 nfpm package -f packaging/nfpm.yaml -p deb -t dist/ # .deb  (-p rpm for .rpm)
 packaging/scripts/build-appimage.sh                                          # needs appimagetool
 flatpak-builder --user --install --force-clean build/flatpak packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.yml
 ```
@@ -260,7 +260,12 @@ GitHub Actions and GitLab CI examples: [docs/mitigations.md](docs/mitigations.md
 * Language packages are reported with a fix version and their location. Upgrading them is left to the application's own build, and the playbook lists them as manual items.
 * Fat jars that nest other jars are only read one level deep.
 * Windows systems are inventoried but not matched against Microsoft's security updates (MSRC) yet.
-* OIDC ID token signatures aren't verified (the token comes straight from the provider over TLS, which the spec allows); issuer, audience, expiry and nonce are.
+* Go programs older than Go 1.18 and Rust programs built without cargo-auditable carry no module list diysca can read, and only 64-bit little-endian programs (x86-64, arm64) are read. Libraries in other programs aren't checked.
+* The language and program scans don't enter other mounts below a scan path, and leave `/usr/bin` to the OS package scan. Programs copied there by hand need `/usr/bin` in `binary_scan_paths`.
+
+## Changes and comparison
+
+What changed in each version: [CHANGELOG.md](CHANGELOG.md). How diysca's findings compare with Trivy, Grype and OSV-Scanner on the same systems: [docs/comparison.md](docs/comparison.md).
 
 ## Issues and security
 
