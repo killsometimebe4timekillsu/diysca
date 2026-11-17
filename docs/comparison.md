@@ -1,0 +1,64 @@
+# diysca compared with Trivy
+
+diysca 0.2.6 finds 3,663 of Trivy's 3,676 OS findings on the same Ubuntu 24.04 system, including all 2,332 that
+have a fix. Of the 13 it doesn't report, Ubuntu's own CVE tracker says 9 don't affect this release. In language
+packages and programs, 34 of the 43 Trivy findings diysca misses are outside the default scan paths, 6 are in jars
+diysca can't identify, and 2 are CVEs OSV doesn't have yet.
+
+Scanned on 2026-11-17, both tools within minutes of each other. A longer write-up, with a feature comparison
+against Grype, Vuls, OpenVAS and Wazuh, is in the
+[comparison report](https://claude.ai/artifact/BZ7XLhpRfr9cUohs49gzKx).
+
+## OS packages
+
+| | diysca 0.2.6 | Trivy 0.76.2 |
+| --- | --- | --- |
+| Findings (one per source package and CVE) | 4,595 | 3,676 |
+| Found by both | 3,663 | 3,663 |
+| Only this tool | 932 | 13 |
+| Trivy's 2,332 fixable findings, also found | 2,332 | 2,332 |
+| Fix installable from the system's own repos | 2,336 | not reported |
+| Fix only in Ubuntu Pro (ESM) | 179 | reported as affected |
+
+Why they differ:
+
+| Difference | Count | Cause | Who is right |
+| --- | --- | --- | --- |
+| Only diysca: open CVEs without a fix | 932 | Mostly Ubuntu status "needs-triage" (not assessed yet). OSV keeps these, Trivy leaves them out. 52 are kernel CVEs | Both defensible |
+| Only Trivy: nasm (7), patch (1), linux (1) | 9 | Ubuntu now marks them "not-affected". OSV picked that up on 2026-11-17, Trivy's database (built 13:00 UTC that day) had not | diysca |
+| Only Trivy: git-lfs CVE-2024-53263, CVE-2025-26625 | 2 | Ubuntu fixed them in 3.4.1-1ubuntu0.3+esm2 (Pro). The installed 3.4.1-1ubuntu0.4 sorts above that | Unclear: the version says fixed, Ubuntu doesn't say whether 0.4 carries the patch |
+| Only Trivy: ffmpeg CVE-2023-6601, CVE-2023-6604 | 2 | Ubuntu status "deferred". OSV doesn't export deferred CVEs | Trivy |
+
+## Language packages and programs
+
+| | diysca 0.2.6 | Trivy 0.76.2 |
+| --- | --- | --- |
+| Findings (package and CVE or GHSA id) | 559 | 439 |
+| Found by both | 396 | 396 |
+| Only this tool | 163 | 43 |
+
+* **Only Trivy (43):**
+  * 27 in `/opt/rclone`, a separate mount (the scan doesn't cross mounts), and 7 in Docker's programs in `/usr/bin`
+    and `/usr/libexec` (left to the OS scan by default). Add those paths to `binary_scan_paths` to include them.
+  * 6 in Bouncy Castle jars shipped with Gradle. These jars have no `pom.properties`, so diysca can't tell what they
+    are; Trivy looks up the jar's checksum in its own Java database.
+  * 2 in Ruby's bundled `resolv` gem. diysca lists the gem, but OSV has no record for these two CVEs yet.
+  * 1 in a crate's `Cargo.lock` inside `~/.cargo/registry`, a download cache that diysca skips on purpose.
+* **Only diysca (163):**
+  * 64 in Python libraries bundled with the Google Cloud SDK (`gsutil`).
+  * 38 in crates compiled into `uv`, a Rust program built with cargo-auditable, which Trivy doesn't report.
+  * 36 from lock files in the Go source trees under `/usr/local/go*` (25 npm, 11 Go) and 19 from lock files inside
+    the rbenv Ruby installs. Trivy's `rootfs` mode skips lock files.
+  * 4 in `gh` (Go standard library and modules) that Trivy's database doesn't match, and 2 others.
+
+## How it was measured
+
+* **System:** a cloud container running Ubuntu 24.04.5 with 847 OS packages and 2,380 language packages.
+* **Trivy:** `trivy rootfs --scanners vuln`, OS and library package types in separate runs, database of
+  2026-11-17.
+* **diysca:** `osv_mode: bulk` (the OSV exports downloaded the same evening), NVD and KEV off, default scan paths,
+  a fresh database.
+* **Matching:** OS findings per source package and CVE, Trivy's binary package names mapped to source packages
+  with `dpkg-query`. Language findings per package name and CVE or GHSA id, aliases included.
+* **Checks:** each Trivy-only OS finding was looked up in the
+  [Ubuntu CVE tracker](https://ubuntu.com/security/cves) for noble.
