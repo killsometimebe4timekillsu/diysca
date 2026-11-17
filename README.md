@@ -16,7 +16,7 @@ diysca is a self-hosted scanner for your Linux systems. It doesn't need an agent
   * apt mirror lists (`mirror+file:`, the default on Debian cloud images, and `mirror+https:`) are followed to the real repo.
   * The fix version is the one the system's package manager would install: repos marked `NotAutomatic` (backports, experimental) only count for packages already installed from them, as with apt's pin priorities. Custom pins in `/etc/apt/preferences` are not read.
   * A repo that can't be read is shown on the system's page and makes the scan result "partial", because fixes in it are not seen.
-* **Language packages:** PyPI, npm, RubyGems, Maven (from the `pom.properties` inside jars), Packagist, crates.io and Go are covered. diysca reads installed packages (`*.dist-info`, `node_modules`, gemspecs, jars) and lockfiles (`package-lock.json`, `yarn.lock`, `Gemfile.lock`, `poetry.lock`, `Pipfile.lock`, `requirements*.txt`, `composer.lock`, `Cargo.lock`, `go.mod`). PHP applications deployed with their `vendor/` directory are read from `vendor/composer/installed.json`, even without `composer.lock`.
+* **Language packages:** PyPI, npm, RubyGems, Maven (from the `pom.properties` inside jars), Packagist, crates.io and Go are covered. diysca reads installed packages (`*.dist-info`, `node_modules`, gemspecs, jars) and lockfiles (`package-lock.json`, `yarn.lock`, `Gemfile.lock`, `poetry.lock`, `Pipfile.lock`, `requirements*.txt`, `composer.lock`, `Cargo.lock`, `go.mod`). PHP applications deployed with their `vendor/` directory are read from `vendor/composer/installed.json`, even without `composer.lock`. Go and Rust programs installed as plain binaries (`/usr/local/bin/gh`, release tarballs in `/opt`) are read too: the Go standard library version and Go modules from the build info, and the crates of Rust programs built with [cargo-auditable](https://github.com/rust-secure-code/cargo-auditable). This needs only `od`, `head`, `tr` and `find` on the system, so it works with BusyBox as well.
 * **Apache modules:** every module Apache loads (`LoadModule` in the Debian, RHEL and source-build config locations) is listed with the OS package it comes from. Modules and an `httpd` from packages are checked for CVEs through that package; modules nobody's package manager owns (built or copied by hand) are flagged, since diysca can't check them.
 * **Container images:** on each host, the images of running containers are scanned (podman, docker, nerdctl and crictl). Each image appears as its own system, `<host>/<container>`, and gets its own OS packages, language packages and SBOM.
 * **Correlation:** installed version × distro advisory ranges × repo candidate version. The comparison uses real dpkg, rpm and apk version semantics, plus per-ecosystem rules for language packages.
@@ -61,7 +61,7 @@ Every release ships the same app in four forms. Pick whichever fits your environ
 ### Native package (Debian/Ubuntu, RHEL/Rocky/Alma/SUSE)
 
 ```bash
-sudo apt install ./diysca_0.2.5_amd64.deb        # or: sudo dnf install ./diysca-0.2.5-1.x86_64.rpm
+sudo apt install ./diysca_0.2.6_amd64.deb        # or: sudo dnf install ./diysca-0.2.6-1.x86_64.rpm
 sudoedit /etc/diysca/config.yml                  # inventories, base_url, ...
 sudo -u diysca ssh-keygen -t ed25519 -f /var/lib/diysca/.ssh/id_ed25519 -N ''
 sudo systemctl enable --now diysca               # UI on 127.0.0.1:8080 (change in /etc/default/diysca)
@@ -106,9 +106,9 @@ Config: `--config /etc/diysca/config.yml` or `DIYSCA_CONFIG`; copy `config.examp
 ### AppImage
 
 ```bash
-chmod +x diysca-0.2.5-x86_64.AppImage
-./diysca-0.2.5-x86_64.AppImage          # starts the UI on 127.0.0.1:8765 and opens your browser
-./diysca-0.2.5-x86_64.AppImage scan     # or use it as the CLI
+chmod +x diysca-0.2.6-x86_64.AppImage
+./diysca-0.2.6-x86_64.AppImage          # starts the UI on 127.0.0.1:8765 and opens your browser
+./diysca-0.2.6-x86_64.AppImage scan     # or use it as the CLI
 ```
 
 ### Flatpak
@@ -195,7 +195,7 @@ diysca serve                            # UI + scheduler on :8080
 
 ```bash
 packaging/scripts/build-standalone.sh                                        # dist/diysca/ (PyInstaller bundle)
-ARCH=amd64 VERSION=0.2.5 nfpm package -f packaging/nfpm.yaml -p deb -t dist/ # .deb  (-p rpm for .rpm)
+ARCH=amd64 VERSION=0.2.6 nfpm package -f packaging/nfpm.yaml -p deb -t dist/ # .deb  (-p rpm for .rpm)
 packaging/scripts/build-appimage.sh                                          # needs appimagetool
 flatpak-builder --user --install --force-clean build/flatpak packaging/flatpak/io.github.killsometimebe4timekillsu.diysca.yml
 ```

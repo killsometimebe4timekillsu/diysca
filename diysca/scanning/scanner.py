@@ -19,7 +19,8 @@ from diysca.scanning.feeds import (
 )
 from diysca.scanning import windows
 from diysca.scanning.inventory import load_inventory
-from diysca.scanning.langpkgs import lang_script, parse_lang_output
+from diysca.scanning import binaries
+from diysca.scanning.langpkgs import lang_script, merge_lang, parse_lang_output
 from diysca.scanning.repos import collect_repo_versions
 from diysca.scanning.transport import transport_for
 
@@ -200,6 +201,12 @@ async def _scan_host(host_id: int, client: OSVClient | None, send_alerts: bool, 
                     lang_pkgs = parse_lang_output(await t.run(lang_script(paths), timeout=settings.lang_scan_timeout))
                 except Exception as e:
                     problems.append(f"language package scan failed: {e}")
+                if settings.scan_binaries:
+                    try:
+                        lang_pkgs = merge_lang(lang_pkgs, await binaries.scan(
+                            t, settings.binary_scan_paths or paths, settings.lang_scan_timeout))
+                    except Exception as e:
+                        problems.append(f"Go / Rust program scan failed: {e}")
             if with_containers and settings.scan_containers and h["kind"] != "container":
                 try:
                     containers = await discover_containers(t)

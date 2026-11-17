@@ -1,5 +1,7 @@
 """Language packages: PyPI, npm, RubyGems, Maven, Packagist (Composer), crates.io, Go.
 
+Programs (Go build info, Rust cargo-auditable data) are read by diysca/scanning/binaries.py.
+
 Two sources on each host (or container):
 * installed artifacts: *.dist-info / *.egg-info, node_modules/*/package.json,
   specifications/*.gemspec, META-INF/maven/**/pom.properties inside *.jar
@@ -265,3 +267,18 @@ def _flush_pom(poms, jar, add):
     p = poms.pop(jar, None)
     if p and p.get("groupId") and p.get("artifactId") and p.get("version"):
         add(LangPackage("Maven", f"{p['groupId']}:{p['artifactId']}", p["version"], [jar]))
+
+
+def merge_lang(*lists: list[LangPackage]) -> list[LangPackage]:
+    """One entry per (ecosystem, name, version), with up to 5 locations."""
+    found: dict[tuple[str, str, str], LangPackage] = {}
+    for lst in lists:
+        for p in lst:
+            key = (p.ecosystem, p.name, p.version)
+            if key not in found:
+                found[key] = LangPackage(p.ecosystem, p.name, p.version, list(p.locations[:5]))
+                continue
+            for loc in p.locations:
+                if loc not in found[key].locations and len(found[key].locations) < 5:
+                    found[key].locations.append(loc)
+    return list(found.values())

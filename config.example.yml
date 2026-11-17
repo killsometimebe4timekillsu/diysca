@@ -48,6 +48,12 @@ scan_interval_hours: 12           # 0 = only scan on demand
 # lockfiles below these paths. Distro-owned dirs like /usr/lib/python3 are left to the OS package scan.
 scan_languages: true
 # lang_scan_paths: [/opt, /srv, /usr/local, /home, /root, /var/www, /var/lib/jenkins, /usr/lib/node_modules]
+# Go and Rust programs below the same paths: the Go version (standard library) and Go modules from the
+# build info, and the crates of Rust programs built with cargo-auditable. Programs from OS packages in
+# /usr/bin are left to the OS scan; add /usr/bin here for programs installed there by hand. Other mounts
+# below a scan path are not entered.
+scan_binaries: true
+# binary_scan_paths: []            # empty = lang_scan_paths
 
 # Container images: on each host, one running container per image is scanned as its own system
 # ("<host>/<container>"). The SSH user needs access to the runtime (rootless podman, docker group,
