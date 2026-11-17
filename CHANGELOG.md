@@ -1,132 +1,141 @@
 # Changelog
 
-All notable changes to diysca. Versions follow [semantic versioning](https://semver.org/) (0.x: minor
-versions may change behaviour). Dates are release dates (UTC).
+All notable changes to diysca. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
+versions follow [Semantic Versioning](https://semver.org/). Only tagged versions are published as releases on
+GitHub; the others are on `main` and in the packages that CI builds for each commit.
 
 ## [Unreleased]
+
+### Added
+- docs/comparison.md: Go and Rust programs on a test VM (gh, uv, fd) compared with Trivy and Grype.
+
+## [0.2.7] - 2026-11-17
+
+### Added
+- This changelog.
+- [docs/comparison.md](docs/comparison.md): what diysca finds compared with Trivy, Grype and OSV-Scanner on the
+  Debian test VMs and an Ubuntu 24.04 system, and why the numbers differ.
+
+### Changed
+- README: the known limitations name what the Go and Rust program scan can't see, and no longer claim that OIDC
+  signatures aren't verified (they are since 0.2.0).
 
 ## [0.2.6] - 2026-11-17
 
 ### Added
-- Go and Rust programs installed as plain binaries (`/usr/local/bin/gh`, release tarballs in `/opt`) are
-  scanned: the Go standard library version and the Go modules from the build info, and the crates of Rust
-  programs built with cargo-auditable. Needs only `od`, `head`, `tr` and `find`, so BusyBox works too.
-  Settings `scan_binaries` (default on) and `binary_scan_paths` (default: the language scan paths).
+- Go and Rust programs installed as plain binaries are scanned (#25). Go programs (1.18 and newer) report the Go
+  standard library version and every module from their build info, with `replace` directives applied. Rust
+  programs built with [cargo-auditable](https://github.com/rust-secure-code/cargo-auditable) report their crates.io
+  crates. Only `od`, `head`, `tr` and `find` are needed on the system, so BusyBox works.
+- Settings `scan_binaries` (default on) and `binary_scan_paths` (default: `lang_scan_paths`).
 
 ### Fixed
-- Go, npm and crates.io versions are compared by semver precedence. Pre-releases ranked above the release,
-  so for example Go 1.26.2 matched GO-2023-1987.
+- Go, npm and crates.io versions are compared by semver precedence. `1.21.0-0`, the lowest pre-release OSV uses in
+  ranges, ranked above `1.21.0`, so newer versions matched old records (for example Go 1.26.2 and GO-2023-1987).
 
-## [0.2.5] - 2026-11-16
+## [0.2.5] - 2026-11-17
 
 ### Fixed
-- OSV bulk mode downloads the maintained ecosystem exports (`Debian/all.zip`, `Ubuntu/all.zip`) and filters
-  them by release. The per-release exports it used before stopped being updated in October 2024, so newer
-  CVEs were missed. A warning goes to the events when a feed's newest advisory is older than 14 days.
-- Ubuntu notices (USN) only name the CVEs whose own Ubuntu record matches the installed version.
+- `osv_mode: bulk` used OSV's per-release exports (`Ubuntu:24.04:LTS/all.zip`, `Debian:12/all.zip`), which OSV
+  stopped updating in October 2024. It now downloads the maintained ecosystem exports (`Ubuntu/all.zip`,
+  `Debian/all.zip`) and filters by release (#24). `file://` mirrors with per-release zips still work.
+- An Ubuntu notice (USN) only names the CVEs whose own record matches the installed version.
 
 ### Added
-- Fixes that Ubuntu publishes only through Ubuntu Pro (ESM) are reported and marked as such (setting
-  `ubuntu_pro_advisories`, default on).
+- Ubuntu LTS systems are also matched against `Ubuntu:Pro:<release>:LTS`. Findings fixed only in Ubuntu Pro (ESM)
+  are marked so and shown as fix upstream unless the system has ESM repos. Setting `ubuntu_pro_advisories`.
+- A warning in Events when a feed's newest advisory is more than 14 days old.
 
 ## [0.2.4] - 2026-11-16
 
+Fixes from the review of 0.2.3 (#23).
+
 ### Security
-- Systems whose name Ansible would read as a host pattern (`all`, `web*`, `a,b`) are listed for manual
-  patching instead of becoming a play target.
-- Inventory providers can no longer take over a system that another source or a person added under the
-  same name.
-- The system filter matches whole names (`web1` no longer matches `web10`); `%` and `_` are literal.
-- Host scopes: a scoped user only sees their own findings of a mitigation, not its playbook, and can't
-  claim, report on or cancel a mitigation that covers systems outside their scope.
-- Roles are worked out from the bindings on every request; unverified OIDC email addresses don't match
-  email bindings; malformed session cookies are rejected instead of causing a 500.
+- A system whose name Ansible would read as a pattern (`all`, `web*`, `a,b`, `!x`) is listed for manual patching
+  instead of becoming a play's `hosts:`.
+- Inventory providers can't take over a system that another source added under the same name.
+- The system filter matches whole names; `%` and `_` are literal in all text filters.
+- A user with a host scope sees only their own findings of a mixed mitigation, not its playbook, and can't act on it.
+- Roles are worked out on every request, so removing a binding takes effect at once.
+- OIDC addresses marked `email_verified: false` don't match `email:` bindings.
 
 ### Fixed
-- One scan per system at a time; database and parsing work run off the event loop; local and SSH commands
-  are stopped on timeout, including the processes the shell started; one failing system no longer ends a
-  scan of all.
-- `/healthz` answers 503 while the database is down; missing columns are added on every start.
-- Bad JSON bodies and a deleted system in a repo update give 4xx instead of 500.
+- One scan per system at a time; database writes and index parsing run off the event loop.
+- Local and SSH commands are stopped (with their child processes) on timeout.
+- One failing system no longer ends a scan of all systems.
+- `/healthz` answers 503 while the database can't be reached; missing columns are added on every start.
+- Bad JSON on the mitigation API gives 422; a repo update for a deleted system no longer crashes.
 
 ### Changed
-- Error pages for browsers, JSON errors for API clients.
-- Config mistakes are named: invalid YAML, wrong types, unknown keys with a hint.
-- The Findings page says when its list is cut at 5000 rows; approving by filter and `diysca playbook` are
-  never cut.
+- `host=` is an exact match (was a substring match). Use `web*` for a prefix.
+- Error pages for browsers, JSON for API clients. Config mistakes are named, with a did-you-mean hint for unknown keys.
+- The findings page says when it shows the worst 5000 of more.
 
 ## [0.2.3] - 2026-11-16
 
+First published release.
+
 ### Added
-- Each system's package repositories: a repo list in the Systems table, a repositories card at the top of
-  the system page with the number of unreadable repos and their errors, and `GET /api/hosts/{id}/repos`.
+- Each system's repositories in the Systems table (expandable count, failed repos marked) and at the top of its
+  page; `GET /api/hosts/{id}/repos` (#21).
 
 ### Fixed
-- CI: the Flatpak is built with the runner's own SDK copy, so a new Flathub SDK no longer breaks the build.
+- CI builds the Flatpak with the runner's own SDK copy (#22).
 
 ## [0.2.2] - 2026-11-15
 
 ### Fixed
-- Patched CVEs: "still open" follows the host, group, severity and ecosystem filters like every other
-  number of the view.
-- Tests no longer read the machine's own diysca config (`/etc/diysca/config.yml` and friends).
+- Patched CVEs: "still open" follows the filters.
+- Tests no longer pick up the machine's own `config.yml` (#20).
 
 ## [0.2.1] - 2026-11-15
 
 ### Fixed
-- apt sources with `mirror+file:`, `mirror+http(s):` and `mirror:` URIs (the Debian cloud image default)
-  are resolved to the real mirror; before, none of such a system's repos could be read and no fix was ever
-  seen as available in its repos.
-- Repo priorities: backports (`NotAutomatic` + `ButAutomaticUpgrades`) and experimental only count the
-  way apt's default pin priorities do, so playbooks pin the version apt would install.
-- A scan whose repos can't be read is reported as partial and names the first failing repo.
-- Mitigations: a finding can't be in two open mitigations; the patch log no longer shows the canceller as
-  executor and says how many packages and manual items a mitigation covered; an approval or
-  `diysca playbook` whose filter matches nothing says so.
-- Mitigation API: `summary.cves_total` gives the full count (`summary.cves` lists at most 50);
-  `rescan_hosts` in the report answer lists system names; the playbook header no longer names a file.
+- The same findings could be approved into two open mitigations (#17).
+- The patch log named the person who cancelled a mitigation as its executor (#17).
+- Approving with a filter that matches nothing says so (#17).
+- apt mirror lists (`mirror+file:`, the default on Debian cloud images) are followed to the real repo (#18).
+- Repos marked `NotAutomatic` (backports) only count for packages installed from them, as with apt's priorities (#18).
+- A repo that can't be read makes the scan "partial" and shows the error (#18).
+- Mitigations report the full CVE count (`summary.cves_total`) and system names in `rescan_hosts` (#19).
 
 ## [0.2.0] - 2026-11-15
 
 ### Security
-- Without a web login (`web_user` / `web_password` or OIDC) diysca only listens on 127.0.0.1;
-  `diysca serve` on another address exits with code 2 unless `allow_no_login: true`.
-- Failed logins are rate limited (5 failures, then a wait that doubles up to 1 hour).
-- OIDC ID token signatures are checked against the provider's keys.
-- Fixes from the security review: playbook template injection, scan script injection, CSRF, file reads
-  through the inventory import, scope checks; security headers (no framing, no MIME sniffing,
-  same-origin referrer).
-
-### Added
-- Modular architecture (`modules:`), OIDC login with roles and host scopes, audit log, patch log,
-  inventory providers (cloud and virtualisation APIs), scan selection by pattern.
-- Approving findings for mitigation, hand-off to webhooks, GitHub Actions and GitLab CI, API tokens,
-  MCP server.
-- Grafana-style web UI, Patched CVEs view, pluggable CVE sources, settings import / export,
-  reprovisioning a system from its SBOM.
-- PHP applications from `vendor/composer/installed.json` and Apache modules.
-- Docs for the NVD API key; issue templates and a security policy; GPL-3.0-or-later license.
+- Fixes from a security review (#14): playbooks can't carry template code from scanned systems, the language scan
+  script no longer runs file names as code, inventory import only reads configured paths, CSRF protection, host
+  scopes on all playbook and MCP paths, open redirects, repo fetch limits, CSV formula escaping.
+- Without a login diysca only listens on 127.0.0.1 (`allow_no_login` for labs); API tokens need a web login; OIDC
+  ID token signatures are verified; failed logins are rate limited per address (#15).
 
 ### Changed
-- NVD enrichment runs in the background and stops on outages, so NVD rate limits never block scans.
-- Language package findings say how to upgrade instead of "not in your repos".
+- The OCI image needs `DIYSCA_WEB_USER` / `DIYSCA_WEB_PASSWORD` or OIDC to start.
 
 ## [0.1.0] - 2026-11-14
 
-First release.
+First version (#1 to #13).
 
-- Agentless scans over SSH (or locally): OS packages (dpkg, rpm, apk) and the repos each system uses.
-- CVE matching with OSV, NVD and CISA KEV, aware of what your own repos offer.
-- Language packages and container images, CycloneDX SBOMs, Apprise alerts.
-- Ansible patch playbooks pinned to the repo version; aptly, Pulp and Foreman repo updates.
-- SQLite or PostgreSQL; packaged as deb, rpm, OCI image, AppImage and Flatpak.
+- Agentless scanning over SSH or locally: dpkg, rpm and apk databases, configured repos and their indexes, and a
+  "your repos offer" fix version per finding.
+- CVE data from OSV (API or bulk mirror), NVD and CISA KEV, plus the Debian tracker, Alpine secdb, EPSS and custom
+  feeds.
+- Language packages (PyPI, npm, RubyGems, Maven, Packagist, crates.io, Go), PHP `vendor/` directories, Apache
+  modules and the images of running containers.
+- PostgreSQL (SQLite as fallback), CycloneDX SBOMs, Apprise alerts with subscriptions.
+- Patching: Ansible playbooks pinned to the repo version, aptly / Pulp / Foreman repo updates, approvals for
+  mitigation with hand-off to webhooks, GitHub and GitLab, an MCP server, a patch log and reprovisioning from an
+  SBOM.
+- Modules, OIDC login with roles and host scopes, an audit log, and inventory providers for hypervisors, clouds
+  and Kubernetes.
+- Grafana-style web UI; native packages, AppImage, Flatpak and an OCI image.
 
-[Unreleased]: https://github.com/killsometimebe4timekillsu/diysca/compare/a60d9df...HEAD
-[0.2.6]: https://github.com/killsometimebe4timekillsu/diysca/compare/e3aae69...a60d9df
-[0.2.5]: https://github.com/killsometimebe4timekillsu/diysca/compare/f2369a3...e3aae69
-[0.2.4]: https://github.com/killsometimebe4timekillsu/diysca/compare/v0.2.3...f2369a3
-[0.2.3]: https://github.com/killsometimebe4timekillsu/diysca/compare/1a355c6...v0.2.3
-[0.2.2]: https://github.com/killsometimebe4timekillsu/diysca/compare/c58ccdc...1a355c6
-[0.2.1]: https://github.com/killsometimebe4timekillsu/diysca/compare/84d6595...c58ccdc
-[0.2.0]: https://github.com/killsometimebe4timekillsu/diysca/compare/f9fc297...84d6595
-[0.1.0]: https://github.com/killsometimebe4timekillsu/diysca/commit/f9fc297
+[Unreleased]: https://github.com/killsometimebe4timekillsu/diysca/compare/v0.2.3...main
+[0.2.7]: https://github.com/killsometimebe4timekillsu/diysca/pull/26
+[0.2.6]: https://github.com/killsometimebe4timekillsu/diysca/pull/25
+[0.2.5]: https://github.com/killsometimebe4timekillsu/diysca/pull/24
+[0.2.4]: https://github.com/killsometimebe4timekillsu/diysca/pull/23
+[0.2.3]: https://github.com/killsometimebe4timekillsu/diysca/releases/tag/v0.2.3
+[0.2.2]: https://github.com/killsometimebe4timekillsu/diysca/pull/20
+[0.2.1]: https://github.com/killsometimebe4timekillsu/diysca/pull/19
+[0.2.0]: https://github.com/killsometimebe4timekillsu/diysca/pull/16
+[0.1.0]: https://github.com/killsometimebe4timekillsu/diysca/pull/1
