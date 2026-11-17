@@ -49,9 +49,30 @@ matter in Debian's build ("unimportant" → LOW). On system 1, 232 of 418 shared
 The rest are mostly diysca HIGH / Trivy LOW (42), diysca MEDIUM / Trivy LOW (50) and diysca CRITICAL / Trivy LOW
 (11). 33 findings without an NVD score show as UNKNOWN in diysca where Trivy shows Debian's rating.
 
+## Go and Rust programs
+
+Three release tarballs were unpacked in `/opt` on system 2: GitHub CLI 2.104.0 (`gh`, Go), uv 0.13.9 (`uv`,
+`uvx`, Rust, built with cargo-auditable) and fd 10.5.2 (Rust without cargo-auditable, as a control).
+
+| | diysca 0.2.6 | Trivy 0.76.2 | Grype 0.121.3 |
+|---|---|---|---|
+| gh: Go modules found | 156 (incl. stdlib 1.27.4) | 156 | – |
+| gh: findings | 3 | 3, the same | 0 |
+| uv: crates found | 446 (build-only crates left out) | 510 | – |
+| uv: findings | 28 | 0 | 0 |
+| fd: crates / findings | 0 / 0 (no dependency list in the binary) | 0 / 0 | 0 / 0 |
+
+* **Go:** diysca and Trivy list the same 156 modules and report the same 3 advisories (`golang.org/x/net`
+  v0.61.0: GO-2026-6860, GO-2026-6866; `golang.org/x/crypto` v0.58.0: GO-2026-5932).
+* **Rust:** both list the same crates, including the ones that appear in two versions (`zstd-safe` 7.2.4 and
+  8.0.0). Trivy reports no vulnerabilities for them. diysca reports 28 RustSec advisories, among them
+  RUSTSEC-2023-0071 (CVE-2023-49092, `rsa` 0.9.10), RUSTSEC-2026-0386 (`tokio` 1.53.2) and twelve for
+  `zstd-safe` 7.2.4; the OSV API returns the same advisories for these versions. 5 of the 28 are "unmaintained"
+  notices without a fix.
+* **Grype** found neither the Go modules nor the crates when pointed at the directory or at each binary.
+
 ## Not covered by this run
 
-* Go and Rust programs: neither system has any outside OS packages, so there was nothing to compare.
 * Container images: no containers ran on the systems.
 * Repo awareness (is the fix in *your* repos?), mitigation and patching are diysca features the other tools
   don't have, so they aren't compared.
