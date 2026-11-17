@@ -33,7 +33,7 @@ What the differences are:
   version, so none is patchable.
 * **6 Debian `TEMP-…` entries only Trivy reports** (tar, groff, bash, sysvinit, shadow, dbus): issues the Debian
   security tracker records without a CVE id. OSV doesn't publish them.
-* **PHP vendor directory:** diysca, Trivy and OSV-Scanner do not agree here. diysca and Trivy find the 14 CVEs of
+* **PHP vendor directory:** diysca and Trivy find the 14 CVEs of
   `guzzlehttp/guzzle` from `vendor/composer/installed.json` (no `composer.lock` deployed). OSV-Scanner and Grype
   don't read that file and report none.
 * **OSV-Scanner false positives:** 3 old CVEs in `postgresql-common` (fixed in source version 178/188/210),
